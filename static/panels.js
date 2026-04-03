@@ -14,6 +14,7 @@ async function switchPanel(name) {
   if (name === 'skills') await loadSkills();
   if (name === 'memory') await loadMemory();
   if (name === 'workspaces') await loadWorkspacesPanel();
+  if (name === 'profiles') await loadProfilesPanel();
   if (name === 'todos') loadTodos();
 }
 
@@ -476,6 +477,7 @@ function toggleWsDropdown(){
   const open=dd.classList.contains('open');
   if(open){closeWsDropdown();}
   else{
+    closeProfileDropdown(); // close profile dropdown if open
     loadWorkspaceList().then(data=>{
       renderWorkspaceDropdown(data.workspaces, S.session?S.session.workspace:'');
       dd.classList.add('open');
@@ -559,6 +561,154 @@ async function switchToWorkspace(path,name){
     await loadDir('.');
     showToast(`Switched to ${name}`);
   }catch(e){setStatus('Switch failed: '+e.message);}
+}
+
+// ── Profile panel + dropdown ──
+let _profilesCache = null;
+
+async function loadProfilesPanel() {
+  const panel = $('profilesPanel');
+  if (!panel) return;
+  try {
+    const data = await api('/api/profiles');
+    _profilesCache = data;
+    panel.innerHTML = '';
+    if (!data.profiles || !data.profiles.length) {
+      panel.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12px">No profiles found.</div>';
+      return;
+    }
+    for (const p of data.profiles) {
+      const card = document.createElement('div');
+      card.className = 'profile-card';
+      const meta = [];
+      if (p.model) meta.push(p.model.split('/').pop());
+      if (p.provider) meta.push(p.provider);
+      if (p.skill_count) meta.push(p.skill_count + ' skill' + (p.skill_count !== 1 ? 's' : ''));
+      if (p.has_env) meta.push('API keys configured');
+      const gwDot = p.gateway_running
+        ? '<span class="profile-opt-badge running" title="Gateway running"></span>'
+        : '<span class="profile-opt-badge stopped" title="Gateway stopped"></span>';
+      const isActive = p.name === data.active;
+      const activeBadge = isActive ? '<span style="color:var(--link);font-size:10px;font-weight:600;margin-left:6px">ACTIVE</span>' : '';
+      card.innerHTML = `
+        <div class="profile-card-header">
+          <div style="min-width:0;flex:1">
+            <div class="profile-card-name${isActive ? ' is-active' : ''}">${gwDot}${esc(p.name)}${p.is_default ? ' <span style="opacity:.5">(default)</span>' : ''}${activeBadge}</div>
+            ${meta.length ? `<div class="profile-card-meta">${esc(meta.join(' \u00b7 '))}</div>` : '<div class="profile-card-meta">No configuration</div>'}
+          </div>
+          <div class="profile-card-actions">
+            ${!isActive ? `<button class="ws-action-btn" onclick="switchToProfile('${esc(p.name)}')" title="Switch to this profile">Use</button>` : ''}
+            ${!p.is_default ? `<button class="ws-action-btn danger" onclick="deleteProfile('${esc(p.name)}')" title="Delete this profile">&#10005;</button>` : ''}
+          </div>
+        </div>`;
+      panel.appendChild(card);
+    }
+  } catch (e) {
+    panel.innerHTML = `<div style="color:var(--accent);font-size:12px;padding:12px">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderProfileDropdown(data) {
+  const dd = $('profileDropdown');
+  if (!dd) return;
+  dd.innerHTML = '';
+  const profiles = data.profiles || [];
+  const active = data.active || 'default';
+  for (const p of profiles) {
+    const opt = document.createElement('div');
+    opt.className = 'profile-opt' + (p.name === active ? ' active' : '');
+    const meta = [];
+    if (p.model) meta.push(p.model.split('/').pop());
+    if (p.skill_count) meta.push(p.skill_count + ' skills');
+    const gwDot = `<span class="profile-opt-badge ${p.gateway_running ? 'running' : 'stopped'}"></span>`;
+    const checkmark = p.name === active ? ' <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--link)" stroke-width="3" style="vertical-align:-1px"><polyline points="20 6 9 17 4 12"/></svg>' : '';
+    opt.innerHTML = `<div class="profile-opt-name">${gwDot}${esc(p.name)}${p.is_default ? ' <span style="opacity:.5;font-weight:400">(default)</span>' : ''}${checkmark}</div>` +
+      (meta.length ? `<div class="profile-opt-meta">${esc(meta.join(' \u00b7 '))}</div>` : '');
+    opt.onclick = async () => {
+      closeProfileDropdown();
+      if (p.name === active) return;
+      await switchToProfile(p.name);
+    };
+    dd.appendChild(opt);
+  }
+  // Divider + Manage link
+  const div = document.createElement('div'); div.className = 'ws-divider'; dd.appendChild(div);
+  const mgmt = document.createElement('div'); mgmt.className = 'profile-opt ws-manage';
+  mgmt.innerHTML = '&#9881; Manage profiles';
+  mgmt.onclick = () => { closeProfileDropdown(); switchPanel('profiles'); };
+  dd.appendChild(mgmt);
+}
+
+function toggleProfileDropdown() {
+  const dd = $('profileDropdown');
+  if (!dd) return;
+  if (dd.classList.contains('open')) { closeProfileDropdown(); return; }
+  closeWsDropdown(); // close workspace dropdown if open
+  api('/api/profiles').then(data => {
+    renderProfileDropdown(data);
+    dd.classList.add('open');
+  }).catch(e => { showToast('Failed to load profiles'); });
+}
+
+function closeProfileDropdown() {
+  const dd = $('profileDropdown');
+  if (dd) dd.classList.remove('open');
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('#profileChipWrap')) closeProfileDropdown();
+});
+
+async function switchToProfile(name) {
+  if (S.busy) { showToast('Cannot switch profiles while agent is running'); return; }
+  try {
+    const data = await api('/api/profile/switch', { method: 'POST', body: JSON.stringify({ name }) });
+    S.activeProfile = data.active || name;
+    syncTopbar();
+    // Refresh dependent panels
+    _skillsData = null;
+    await populateModelDropdown();
+    if (_currentPanel === 'skills') await loadSkills();
+    if (_currentPanel === 'memory') await loadMemory();
+    if (_currentPanel === 'tasks') await loadCrons();
+    if (_currentPanel === 'profiles') await loadProfilesPanel();
+    showToast('Switched to profile: ' + name);
+  } catch (e) { showToast('Switch failed: ' + e.message); }
+}
+
+function toggleProfileForm() {
+  const form = $('profileCreateForm');
+  if (!form) return;
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+  if (form.style.display !== 'none') {
+    $('profileFormName').value = '';
+    $('profileFormClone').checked = false;
+    const errEl = $('profileFormError');
+    if (errEl) errEl.style.display = 'none';
+    $('profileFormName').focus();
+  }
+}
+
+async function submitProfileCreate() {
+  const name = ($('profileFormName').value || '').trim().toLowerCase();
+  const cloneConfig = $('profileFormClone').checked;
+  const errEl = $('profileFormError');
+  if (!name) { errEl.textContent = 'Name is required'; errEl.style.display = ''; return; }
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) { errEl.textContent = 'Lowercase letters, numbers, hyphens, underscores only'; errEl.style.display = ''; return; }
+  try {
+    await api('/api/profile/create', { method: 'POST', body: JSON.stringify({ name, clone_config: cloneConfig }) });
+    toggleProfileForm();
+    await loadProfilesPanel();
+    showToast('Profile created: ' + name);
+  } catch (e) { errEl.textContent = e.message || 'Create failed'; errEl.style.display = ''; }
+}
+
+async function deleteProfile(name) {
+  if (!confirm(`Delete profile "${name}"? This removes all config, skills, memory, and sessions for this profile.`)) return;
+  try {
+    await api('/api/profile/delete', { method: 'POST', body: JSON.stringify({ name }) });
+    await loadProfilesPanel();
+    showToast('Profile deleted: ' + name);
+  } catch (e) { showToast('Delete failed: ' + e.message); }
 }
 
 // ── Memory panel ──

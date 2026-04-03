@@ -363,6 +363,25 @@
 .ws-row-actions{display:flex;gap:4px;flex-shrink:0;}
 .ws-action-btn{padding:4px 9px;border-radius:6px;font-size:11px;font-weight:600;border:1px solid var(--border2);background:rgba(255,255,255,.05);color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap;}
 .ws-action-btn:hover{background:rgba(255,255,255,.1);color:var(--text);}
+/* ── Profile dropdown + management panel ── */
+.profile-chip{user-select:none;color:rgba(168,139,250,.9)!important;}
+.profile-dropdown{display:none;position:absolute;top:calc(100% + 6px);right:0;min-width:260px;background:#1a2535;border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:200;overflow:hidden;max-height:380px;overflow-y:auto;}
+.profile-dropdown.open{display:block;}
+.profile-opt{padding:9px 14px;cursor:pointer;transition:background .12s;}
+.profile-opt:hover{background:rgba(255,255,255,.07);}
+.profile-opt.active{background:rgba(168,139,250,.08);}
+.profile-opt-name{font-size:13px;color:var(--text);font-weight:500;}
+.profile-opt-meta{font-size:11px;color:var(--muted);margin-top:2px;}
+.profile-opt-badge{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle;}
+.profile-opt-badge.running{background:#4caf50;box-shadow:0 0 4px rgba(76,175,80,.5);}
+.profile-opt-badge.stopped{background:rgba(255,255,255,.2);}
+.profile-card{padding:10px 0;border-bottom:1px solid var(--border);}
+.profile-card:last-of-type{border-bottom:none;}
+.profile-card-header{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.profile-card-name{font-size:13px;font-weight:600;color:var(--text);}
+.profile-card-name.is-active{color:rgba(168,139,250,.9);}
+.profile-card-meta{font-size:11px;color:var(--muted);margin-top:3px;padding-left:12px;}
+.profile-card-actions{display:flex;gap:4px;flex-shrink:0;}
 /* ── Slash command autocomplete dropdown ── */
 .cmd-dropdown{display:none;position:absolute;bottom:100%;left:0;right:0;background:#1a2535;border:1px solid var(--border2);border-radius:10px;box-shadow:0 -8px 24px rgba(0,0,0,.4);z-index:200;max-height:240px;overflow-y:auto;margin-bottom:4px;}
 .cmd-dropdown.open{display:block;}

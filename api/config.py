@@ -134,17 +134,44 @@ if _AGENT_DIR is not None:
 else:
     _HERMES_FOUND = False
 
-# ── Config file (optional YAML) ──────────────────────────────────────────────
-CONFIG_PATH = Path(os.getenv(
-    'HERMES_CONFIG_PATH',
-    str(HOME / '.hermes' / 'config.yaml')
-)).expanduser()
+# ── Config file (reloadable -- supports profile switching) ──────────────────
+_cfg_cache = {}
+_cfg_lock = threading.Lock()
 
-try:
-    import yaml as _yaml
-    cfg = _yaml.safe_load(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else {}
-except Exception:
-    cfg = {}
+def _get_config_path() -> Path:
+    """Return config.yaml path for the active profile."""
+    env_override = os.getenv('HERMES_CONFIG_PATH')
+    if env_override:
+        return Path(env_override).expanduser()
+    try:
+        from api.profiles import get_active_hermes_home
+        return get_active_hermes_home() / 'config.yaml'
+    except ImportError:
+        return HOME / '.hermes' / 'config.yaml'
+
+def get_config() -> dict:
+    """Return the cached config dict, loading from disk if needed."""
+    if not _cfg_cache:
+        reload_config()
+    return _cfg_cache
+
+def reload_config():
+    """Reload config.yaml from the active profile's directory."""
+    with _cfg_lock:
+        _cfg_cache.clear()
+        config_path = _get_config_path()
+        try:
+            import yaml as _yaml
+            if config_path.exists():
+                loaded = _yaml.safe_load(config_path.read_text())
+                if isinstance(loaded, dict):
+                    _cfg_cache.update(loaded)
+        except Exception:
+            pass
+
+# Initial load
+reload_config()
+cfg = _cfg_cache  # alias for backward compat with existing references
 
 # ── Default workspace discovery ───────────────────────────────────────────────
 def _discover_default_workspace() -> Path:
@@ -183,7 +210,7 @@ def print_startup_config():
         f'  state dir   : {STATE_DIR}',
         f'  workspace   : {DEFAULT_WORKSPACE}',
         f'  host:port   : {HOST}:{PORT}',
-        f'  config file : {CONFIG_PATH}  {"(found)" if CONFIG_PATH.exists() else "(not found, using defaults)"}',
+        f'  config file : {_get_config_path()}  {"(found)" if _get_config_path().exists() else "(not found, using defaults)"}',
         '',
     ]
     print('\n'.join(lines), flush=True)
@@ -234,11 +261,12 @@ MIME_MAP = {
 }
 
 # ── Toolsets (from config.yaml or hardcoded default) ─────────────────────────
-CLI_TOOLSETS = cfg.get('platform_toolsets', {}).get('cli', [
+_DEFAULT_TOOLSETS = [
     'browser', 'clarify', 'code_execution', 'cronjob', 'delegation', 'file',
     'image_gen', 'memory', 'session_search', 'skills', 'terminal', 'todo',
     'web', 'webhook',
-])
+]
+CLI_TOOLSETS = get_config().get('platform_toolsets', {}).get('cli', _DEFAULT_TOOLSETS)
 
 # ── Model / provider discovery ───────────────────────────────────────────────
 
@@ -396,7 +424,11 @@ def get_available_models() -> dict:
 
     # 3. Try to read auth store for active provider (if hermes is installed)
     if not active_provider:
-        auth_store_path = HOME / '.hermes' / 'auth.json'
+        try:
+            from api.profiles import get_active_hermes_home as _gah
+            auth_store_path = _gah() / 'auth.json'
+        except ImportError:
+            auth_store_path = HOME / '.hermes' / 'auth.json'
         if auth_store_path.exists():
             try:
                 import json as _j
@@ -406,7 +438,11 @@ def get_available_models() -> dict:
                 pass
 
     # 4. Check for API keys that imply available providers
-    hermes_env_path = HOME / '.hermes' / '.env'
+    try:
+        from api.profiles import get_active_hermes_home as _gah2
+        hermes_env_path = _gah2() / '.env'
+    except ImportError:
+        hermes_env_path = HOME / '.hermes' / '.env'
     env_keys = {}
     if hermes_env_path.exists():
         try:
@@ -655,3 +691,11 @@ if SETTINGS_FILE.exists():
 
 # ── SESSIONS in-memory cache (LRU OrderedDict) ───────────────────────────────
 SESSIONS: collections.OrderedDict = collections.OrderedDict()
+
+# ── Profile state initialisation ────────────────────────────────────────────
+# Must run after all imports are resolved to correctly patch module-level caches
+try:
+    from api.profiles import init_profile_state
+    init_profile_state()
+except ImportError:
+    pass  # hermes_cli not available -- default profile only

@@ -309,6 +309,11 @@ document.querySelectorAll('.suggestion').forEach(btn=>{
 (async()=>{
   // Load send key preference
   try{const s=await api('/api/settings');window._sendKey=s.send_key||'enter';}catch(e){window._sendKey='enter';}
+  // Fetch active profile
+  try{const p=await api('/api/profile/active');S.activeProfile=p.name||'default';}catch(e){S.activeProfile='default';}
+  // Update profile chip label immediately
+  const profileLabel=$('profileChipLabel');
+  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
   // Fetch available models from server and populate dropdown dynamically
   await populateModelDropdown();
   // Restore last-used model preference

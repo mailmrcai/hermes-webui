@@ -13,13 +13,14 @@
 <body>
 <div class="layout">
   <aside class="sidebar">
-    <div class="sidebar-header"><div class="logo">H</div><div><h1 style="margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em">Hermes</h1><div style="font-size:10px;color:var(--muted);opacity:.8;margin-top:1px">v0.23</div></div></div>
+    <div class="sidebar-header"><div class="logo">H</div><div><h1 style="margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em">Hermes</h1><div style="font-size:10px;color:var(--muted);opacity:.8;margin-top:1px">v0.24</div></div></div>
     <div class="sidebar-nav">
       <button class="nav-tab active" data-panel="chat" data-label="Chat" onclick="switchPanel('chat')" title="Chat">&#128172;</button>
       <button class="nav-tab" data-panel="tasks" data-label="Tasks" onclick="switchPanel('tasks')" title="Tasks">&#128197;</button>
       <button class="nav-tab" data-panel="skills" data-label="Skills" onclick="switchPanel('skills')" title="Skills">&#129513;</button>
       <button class="nav-tab" data-panel="memory" data-label="Memory" onclick="switchPanel('memory')" title="Memory">&#129504;</button>
       <button class="nav-tab" data-panel="workspaces" data-label="Spaces" onclick="switchPanel('workspaces')" title="Spaces">&#128193;</button>
+      <button class="nav-tab" data-panel="profiles" data-label="Profiles" onclick="switchPanel('profiles')" title="Agent profiles"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button>
       <button class="nav-tab" data-panel="todos" data-label="Todos" onclick="switchPanel('todos')" title="Current task list">&#9989;</button>
     </div>
     <!-- Chat panel -->
@@ -104,6 +105,26 @@
       <div style="padding:10px 12px 4px;font-size:11px;color:var(--muted)">Add and switch workspaces for your sessions.</div>
       <div style="flex:1;overflow-y:auto;padding:0 12px 12px" id="workspacesPanel"><div style="color:var(--muted);font-size:12px">Loading...</div></div>
     </div>
+    <!-- Profiles panel -->
+    <div class="panel-view" id="panelProfiles">
+      <div class="sidebar-section" style="padding-bottom:4px;display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:11px;color:var(--muted)">Agent profiles</div>
+        <button class="cron-btn run" style="padding:3px 8px;font-size:10px" onclick="toggleProfileForm()">+ New profile</button>
+      </div>
+      <!-- Profile create form (hidden by default) -->
+      <div id="profileCreateForm" style="display:none;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0">
+        <input id="profileFormName" placeholder="Profile name (lowercase, a-z 0-9 hyphens)" style="width:100%;background:rgba(255,255,255,.05);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:5px 8px;font-size:12px;outline:none;margin-bottom:6px;box-sizing:border-box">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-bottom:8px;cursor:pointer">
+          <input type="checkbox" id="profileFormClone" style="accent-color:var(--accent)"> Clone config from active profile
+        </label>
+        <div style="display:flex;gap:6px">
+          <button class="cron-btn run" style="flex:1" onclick="submitProfileCreate()">Create</button>
+          <button class="cron-btn" style="flex:1" onclick="toggleProfileForm()">Cancel</button>
+        </div>
+        <div id="profileFormError" style="font-size:11px;color:var(--accent);margin-top:6px;display:none"></div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:0 12px 12px" id="profilesPanel"><div style="color:var(--muted);font-size:12px">Loading...</div></div>
+    </div>
     <div class="sidebar-bottom">
       <div class="field-label" style="font-size:10px;letter-spacing:.07em;margin-bottom:4px">MODEL</div>
       <select id="modelSelect">
@@ -148,6 +169,10 @@
       </button>
       <div style="flex:1;min-width:0;overflow:hidden"><div class="topbar-title" id="topbarTitle">Hermes</div><div class="topbar-meta" id="topbarMeta">Start a new conversation</div></div>
       <div class="topbar-chips">
+        <div id="profileChipWrap" style="position:relative">
+          <div class="chip profile-chip" id="profileChip" onclick="toggleProfileDropdown()" title="Switch profile" style="cursor:pointer"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span id="profileChipLabel">default</span> &#9662;</div>
+          <div class="profile-dropdown" id="profileDropdown"></div>
+        </div>
         <div class="chip model" id="modelChip">GPT-5.4 Mini</div>
         <div id="wsChipWrap" style="position:relative">
           <div class="chip ws-chip" id="wsChip" onclick="toggleWsDropdown()" title="Switch workspace" style="cursor:pointer">&#128193; test-workspace &#9662;</div>

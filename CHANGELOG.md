@@ -5,6 +5,51 @@
 
 ---
 
+## [v0.24] Sprint 22 -- Multi-Profile Support (Issue #28)
+*April 3, 2026 | 415 tests*
+
+### Features
+- **Profile picker (topbar).** Purple-accented chip with SVG user icon. Click
+  to open dropdown listing all profiles with gateway status dots (green =
+  running), model info, and skill count. Click any profile to switch; "Manage
+  profiles" link opens the sidebar panel.
+- **Profiles management panel.** New sidebar tab with full CRUD UI. Profile
+  cards show name, model/provider, skill count, API key status, and gateway
+  status badge. "Use" button switches profile, delete button removes non-default
+  profiles (with confirmation).
+- **Profile creation.** "+ New profile" form with name validation (`[a-z0-9_-]`),
+  optional "clone config from active" checkbox. Wraps the CLI's
+  `hermes_cli.profiles.create_profile()`.
+- **Profile deletion.** Confirm dialog. Auto-switches to default if deleting
+  the active profile. Blocked while agent is running.
+- **Seamless profile switching.** No server restart. Profile switch updates
+  `HERMES_HOME`, patches module-level caches in hermes-agent's `skills_tool`
+  and `cron/jobs`, reloads `.env` API keys and `config.yaml`, refreshes the
+  model dropdown, skills, memory, and cron panels.
+- **Per-session profile tracking.** `profile` field on Session records which
+  profile was active at creation. Backward-compatible (`null` for old sessions).
+
+### Bug Fixes
+- **Hardcoded `~/.hermes` paths.** Memory read/write and model discovery used
+  hardcoded paths. Now resolved through `get_active_hermes_home()`.
+- **Module-level path caching.** hermes-agent modules snapshot `HERMES_HOME`
+  at import time. Profile switch now monkey-patches `SKILLS_DIR`, `CRON_DIR`,
+  `JOBS_FILE`, `OUTPUT_DIR` so they track the active profile.
+
+### Architecture
+- New `api/profiles.py`: profile state management wrapping `hermes_cli.profiles`.
+  Thread-safe (`_profile_lock`). Lazy imports avoid circular deps.
+- `api/config.py`: module-level `cfg` replaced with reloadable `get_config()`
+  / `reload_config()`. Dynamic `_get_config_path()` resolves through profile.
+- `api/streaming.py`: `HERMES_HOME` added to env save/restore block.
+- Profile switch blocked while agent streams are active.
+- 5 new API endpoints: `GET /api/profiles`, `GET /api/profile/active`,
+  `POST /api/profile/switch`, `POST /api/profile/create`,
+  `POST /api/profile/delete`.
+- Zero modifications to hermes-agent code.
+
+---
+
 ## [v0.23] Sprint 21 -- Mobile Responsive + Docker
 *April 3, 2026 | 415 tests*
 
@@ -748,4 +793,4 @@ Three-panel layout: sessions sidebar, chat area, workspace panel.
 
 ---
 
-*Last updated: v0.23, April 3, 2026 | Tests: 415*
+*Last updated: v0.24, April 3, 2026 | Tests: 415*

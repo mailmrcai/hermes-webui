@@ -1,4 +1,4 @@
-const S={session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.'};
+const S={session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default'};
 const INFLIGHT={};  // keyed by session_id while request in-flight
 const MSG_QUEUE=[];  // messages queued while a request is in-flight
 const $=id=>document.getElementById(id);
@@ -353,6 +353,9 @@ function syncTopbar(){
     sidebarPath.textContent=ws;
   }
   // modelSelect already set above
+  // Update profile chip label
+  const profileLabel=$('profileChipLabel');
+  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
 }
 
 function msgContent(m){

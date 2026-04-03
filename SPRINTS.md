@@ -1,6 +1,6 @@
 # Hermes Web UI -- Forward Sprint Plan
 
-> Current state: v0.23 | 415 tests | Daily driver ready
+> Current state: v0.24 | 415 tests | Daily driver ready
 > This document plans the path from here to two targets:
 >
 > Target A: 1:1 feature parity with the Hermes CLI (everything you can do from the
@@ -454,14 +454,60 @@ enables deployment beyond localhost. Both were achievable without new dependenci
 
 ---
 
-## Sprint 22 -- Multi-Profile Support (PLANNED, Issue #28)
+## Sprint 22 -- Multi-Profile Support (COMPLETED, Issue #28)
 
-**Theme:** Switch between Hermes agent profiles seamlessly.
+**Theme:** Switch between Hermes agent profiles seamlessly from the web UI.
+
+**Why now:** Issue #28 requested full profile management in the UI. The CLI has
+had comprehensive profile support since v0.6.0 — isolated instances with their
+own config, skills, memory, cron, and API keys. The web UI was locked to a
+single default profile, blocking multi-persona workflows.
+
+### Track A: Bugs
+- **Hardcoded `~/.hermes` paths.** Memory read/write in routes.py and model
+  discovery in config.py used hardcoded paths instead of the active profile's
+  directory. Fixed to resolve through `get_active_hermes_home()`.
+- **Module-level cached paths.** hermes-agent's `skills_tool.py` and `cron/jobs.py`
+  snapshot `HERMES_HOME` at import time. Profile switch now monkey-patches these
+  cached variables (`SKILLS_DIR`, `CRON_DIR`, `JOBS_FILE`, `OUTPUT_DIR`).
 
 ### Track B: Features
-- **Profile picker.** Sidebar or topbar dropdown to switch profiles.
-- **Per-profile config.** Each profile has its own skills, memory, config.yaml.
-- **Seamless switching.** No restart required.
+- **Profile picker (topbar).** Purple-accented chip with SVG user icon in the
+  topbar. Click opens a dropdown listing all profiles with gateway status dots,
+  model info, and skill count. Click to switch; "Manage profiles" link opens
+  the management panel.
+- **Profiles sidebar panel.** New nav tab with full management UI. Cards show
+  each profile with model, provider, skill count, API key status, and gateway
+  badge. "Use" button to switch, delete button for non-default profiles.
+- **Profile creation.** "+ New profile" form with name validation (lowercase
+  alphanumeric + hyphens), optional "clone config from active" checkbox. Wraps
+  `hermes_cli.profiles.create_profile()`.
+- **Profile deletion.** Confirm dialog, auto-switches to default if deleting
+  the active profile. Blocked while agent is running.
+- **Seamless switching.** No server restart required. Profile switch updates
+  `HERMES_HOME` env var, patches module-level caches, reloads `.env` API keys,
+  reloads `config.yaml`, and refreshes the model dropdown, skills, memory, and
+  cron panels.
+- **Per-session profile tracking.** New `profile` field on Session records which
+  profile was active when the session was created. Backward-compatible (defaults
+  to `null` for old sessions).
+
+### Track C: Architecture
+- New `api/profiles.py` module (~200 lines): profile state management wrapping
+  `hermes_cli.profiles`. Thread-safe with `_profile_lock`. Lazy imports to
+  avoid circular dependencies.
+- `api/config.py`: Replaced module-level `cfg` dict with reloadable
+  `get_config()`/`reload_config()`. Dynamic `_get_config_path()` resolves
+  through active profile.
+- `api/streaming.py`: `HERMES_HOME` added to env save/restore block around
+  agent runs (alongside `TERMINAL_CWD`, `HERMES_EXEC_ASK`).
+- Profile switch blocked while any agent stream is active (process-global
+  `HERMES_HOME` cannot be changed mid-run).
+- Zero modifications to hermes-agent code required.
+
+**Tests:** 0 new (profile management requires hermes-agent integration). Total: 415.
+**Hermes CLI parity impact:** Very High (profile support is a major CLI feature)
+**Claude parity impact:** Low (Claude has no profile concept)
 
 ---
 
@@ -510,7 +556,8 @@ enables deployment beyond localhost. Both were achievable without new dependenci
 | Slash commands | Done (Sprint 17) |
 | Thinking/reasoning display | Done (Sprint 18) |
 | Auth / login | Done (Sprint 19) |
-| Voice input | Sprint 20 |
+| Voice input | Done (Sprint 20) |
+| Multi-profile support | Done (Sprint 22) |
 | Subagent visibility | Deferred |
 | Code execution (Jupyter) | Deferred |
 | Toolset control | Deferred |
@@ -538,11 +585,11 @@ enables deployment beyond localhost. Both were achievable without new dependenci
 | Mobile layout (basic) | Done (v0.16.1) |
 | Workspace tree view | Done (Sprint 18) |
 | Slash commands | Done (Sprint 17) |
-| Voice input | Sprint 20 |
-| TTS playback | Sprint 20 |
+| Voice input | Done (Sprint 20) |
+| TTS playback | Deferred |
 | Artifacts (HTML/SVG preview) | Deferred |
 | Code execution inline | Deferred |
-| Mobile-optimized layout | Sprint 21 |
+| Mobile-optimized layout | Done (Sprint 21) |
 | Sharing / public URLs | Not planned (requires server infra) |
 | Claude-specific features | Not replicable (Projects AI, artifacts sync) |
 
@@ -560,5 +607,5 @@ enables deployment beyond localhost. Both were achievable without new dependenci
 ---
 
 *Last updated: April 3, 2026*
-*Current version: v0.23 | 415 tests*
-*Next sprint: Sprint 22 (Multi-Profile Support)*
+*Current version: v0.24 | 415 tests*
+*Next sprint: Sprint 23 (Desktop Application)*

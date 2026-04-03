@@ -34,8 +34,8 @@ def _write_session_index():
 
 
 class Session:
-    def __init__(self, session_id=None, title='Untitled', workspace=str(DEFAULT_WORKSPACE), model=DEFAULT_MODEL, messages=None, created_at=None, updated_at=None, tool_calls=None, pinned=False, archived=False, project_id=None, **kwargs):
-        self.session_id = session_id or uuid.uuid4().hex[:12]; self.title = title; self.workspace = str(Path(workspace).expanduser().resolve()); self.model = model; self.messages = messages or []; self.tool_calls = tool_calls or []; self.created_at = created_at or time.time(); self.updated_at = updated_at or time.time(); self.pinned = bool(pinned); self.archived = bool(archived); self.project_id = project_id or None
+    def __init__(self, session_id=None, title='Untitled', workspace=str(DEFAULT_WORKSPACE), model=DEFAULT_MODEL, messages=None, created_at=None, updated_at=None, tool_calls=None, pinned=False, archived=False, project_id=None, profile=None, **kwargs):
+        self.session_id = session_id or uuid.uuid4().hex[:12]; self.title = title; self.workspace = str(Path(workspace).expanduser().resolve()); self.model = model; self.messages = messages or []; self.tool_calls = tool_calls or []; self.created_at = created_at or time.time(); self.updated_at = updated_at or time.time(); self.pinned = bool(pinned); self.archived = bool(archived); self.project_id = project_id or None; self.profile = profile
     @property
     def path(self): return SESSION_DIR / f'{self.session_id}.json'
     def save(self): self.updated_at = time.time(); self.path.write_text(json.dumps(self.__dict__, ensure_ascii=False, indent=2), encoding='utf-8'); _write_session_index()
@@ -44,7 +44,7 @@ class Session:
         p = SESSION_DIR / f'{sid}.json'
         if not p.exists(): return None
         return cls(**json.loads(p.read_text(encoding='utf-8')))
-    def compact(self): return {'session_id': self.session_id, 'title': self.title, 'workspace': self.workspace, 'model': self.model, 'message_count': len(self.messages), 'created_at': self.created_at, 'updated_at': self.updated_at, 'pinned': self.pinned, 'archived': self.archived, 'project_id': self.project_id}
+    def compact(self): return {'session_id': self.session_id, 'title': self.title, 'workspace': self.workspace, 'model': self.model, 'message_count': len(self.messages), 'created_at': self.created_at, 'updated_at': self.updated_at, 'pinned': self.pinned, 'archived': self.archived, 'project_id': self.project_id, 'profile': self.profile}
 
 def get_session(sid):
     with LOCK:
@@ -63,7 +63,12 @@ def get_session(sid):
 
 def new_session(workspace=None, model=None):
     # Use _cfg.DEFAULT_MODEL (not the import-time snapshot) so save_settings() changes take effect
-    s = Session(workspace=workspace or get_last_workspace(), model=model or _cfg.DEFAULT_MODEL)
+    try:
+        from api.profiles import get_active_profile_name
+        _profile = get_active_profile_name()
+    except ImportError:
+        _profile = None
+    s = Session(workspace=workspace or get_last_workspace(), model=model or _cfg.DEFAULT_MODEL, profile=_profile)
     with LOCK:
         SESSIONS[s.session_id] = s
         SESSIONS.move_to_end(s.session_id)

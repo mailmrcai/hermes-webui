@@ -234,6 +234,15 @@ def handle_get(handler, parsed):
     if parsed.path == '/api/memory':
         return _handle_memory_read(handler)
 
+    # ── Profile API (GET) ──
+    if parsed.path == '/api/profiles':
+        from api.profiles import list_profiles_api, get_active_profile_name
+        return j(handler, {'profiles': list_profiles_api(), 'active': get_active_profile_name()})
+
+    if parsed.path == '/api/profile/active':
+        from api.profiles import get_active_profile_name, get_active_hermes_home
+        return j(handler, {'name': get_active_profile_name(), 'path': str(get_active_hermes_home())})
+
     return False  # 404
 
 
@@ -371,6 +380,53 @@ def handle_post(handler, parsed):
     # ── Memory (POST) ──
     if parsed.path == '/api/memory/write':
         return _handle_memory_write(handler, body)
+
+    # ── Profile API (POST) ──
+    if parsed.path == '/api/profile/switch':
+        name = body.get('name', '').strip()
+        if not name: return bad(handler, 'name is required')
+        try:
+            from api.profiles import switch_profile
+            result = switch_profile(name)
+            return j(handler, result)
+        except (ValueError, FileNotFoundError) as e:
+            return bad(handler, str(e), 404)
+        except RuntimeError as e:
+            return bad(handler, str(e), 409)
+
+    if parsed.path == '/api/profile/create':
+        name = body.get('name', '').strip()
+        if not name: return bad(handler, 'name is required')
+        import re as _re
+        if not _re.match(r'^[a-z0-9][a-z0-9_-]{0,63}$', name):
+            return bad(handler, 'Invalid profile name: lowercase letters, numbers, hyphens, underscores only')
+        clone_from = body.get('clone_from')
+        if clone_from is not None:
+            clone_from = str(clone_from).strip()
+            if not _re.match(r'^[a-z0-9][a-z0-9_-]{0,63}$', clone_from):
+                return bad(handler, 'Invalid clone_from name')
+        try:
+            from api.profiles import create_profile_api
+            result = create_profile_api(
+                name,
+                clone_from=clone_from,
+                clone_config=bool(body.get('clone_config', False)),
+            )
+            return j(handler, {'ok': True, 'profile': result})
+        except (ValueError, FileExistsError, RuntimeError) as e:
+            return bad(handler, str(e))
+
+    if parsed.path == '/api/profile/delete':
+        name = body.get('name', '').strip()
+        if not name: return bad(handler, 'name is required')
+        try:
+            from api.profiles import delete_profile_api
+            result = delete_profile_api(name)
+            return j(handler, result)
+        except (ValueError, FileNotFoundError) as e:
+            return bad(handler, str(e))
+        except RuntimeError as e:
+            return bad(handler, str(e), 409)
 
     # ── Settings (POST) ──
     if parsed.path == '/api/settings':
@@ -731,7 +787,11 @@ def _handle_cron_recent(handler, parsed):
 
 
 def _handle_memory_read(handler):
-    mem_dir = Path.home() / '.hermes' / 'memories'
+    try:
+        from api.profiles import get_active_hermes_home
+        mem_dir = get_active_hermes_home() / 'memories'
+    except ImportError:
+        mem_dir = Path.home() / '.hermes' / 'memories'
     mem_file = mem_dir / 'MEMORY.md'
     user_file = mem_dir / 'USER.md'
     memory = mem_file.read_text(encoding='utf-8', errors='replace') if mem_file.exists() else ''
@@ -1078,7 +1138,11 @@ def _handle_skill_delete(handler, body):
 def _handle_memory_write(handler, body):
     try: require(body, 'section', 'content')
     except ValueError as e: return bad(handler, str(e))
-    mem_dir = Path.home() / '.hermes' / 'memories'
+    try:
+        from api.profiles import get_active_hermes_home
+        mem_dir = get_active_hermes_home() / 'memories'
+    except ImportError:
+        mem_dir = Path.home() / '.hermes' / 'memories'
     mem_dir.mkdir(parents=True, exist_ok=True)
     section = body['section']
     if section == 'memory':

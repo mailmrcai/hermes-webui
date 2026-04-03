@@ -64,19 +64,30 @@ def _run_agent_streaming(session_id, msg_text, model, workspace, stream_id, atta
             put('cancel', {'message': 'Cancelled before start'})
             return
 
+        # Resolve profile home for this agent run (snapshot at start)
+        try:
+            from api.profiles import get_active_hermes_home
+            _profile_home = str(get_active_hermes_home())
+        except ImportError:
+            _profile_home = os.environ.get('HERMES_HOME', '')
+
         _set_thread_env(
             TERMINAL_CWD=str(s.workspace),
             HERMES_EXEC_ASK='1',
             HERMES_SESSION_KEY=session_id,
+            HERMES_HOME=_profile_home,
         )
         # Still set process-level env as fallback for tools that bypass thread-local
         with _agent_lock:
           old_cwd = os.environ.get('TERMINAL_CWD')
           old_exec_ask = os.environ.get('HERMES_EXEC_ASK')
           old_session_key = os.environ.get('HERMES_SESSION_KEY')
+          old_hermes_home = os.environ.get('HERMES_HOME')
           os.environ['TERMINAL_CWD'] = str(s.workspace)
           os.environ['HERMES_EXEC_ASK'] = '1'
           os.environ['HERMES_SESSION_KEY'] = session_id
+          if _profile_home:
+              os.environ['HERMES_HOME'] = _profile_home
 
           try:
             def on_token(text):
@@ -187,6 +198,8 @@ def _run_agent_streaming(session_id, msg_text, model, workspace, stream_id, atta
             else: os.environ['HERMES_EXEC_ASK'] = old_exec_ask
             if old_session_key is None: os.environ.pop('HERMES_SESSION_KEY', None)
             else: os.environ['HERMES_SESSION_KEY'] = old_session_key
+            if old_hermes_home is None: os.environ.pop('HERMES_HOME', None)
+            else: os.environ['HERMES_HOME'] = old_hermes_home
 
     except Exception as e:
         print('[webui] stream error:\n' + traceback.format_exc(), flush=True)
