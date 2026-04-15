@@ -1,5 +1,11 @@
 # Hermes Web UI -- Changelog
 
+## [v0.50.55] — 2026-04-15
+
+### Fixed
+- **Docker honcho extra** — `docker_init.bash` now installs `hermes-agent[honcho]` so `honcho-ai` is included in the venv on every fresh Docker build. Fixes `"Honcho session could not be initialized."` errors on rebuilt containers. (Fixes #553)
+- **Version badge** — `index.html` version badge corrected to v0.50.55 (was missing the bump for this release).
+
 ## [v0.50.54] — 2026-04-15
 
 ### Changed
