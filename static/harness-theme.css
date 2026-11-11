@@ -1,0 +1,795 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Harness theme — DeepSeek-Harness-inspired reskin for the Hermes WebUI.
+
+   Loaded AFTER style.css (see index.html) so these rules win the cascade.
+   Scope: colour, typography and layout only — no markup or behaviour changes.
+   Remove the <link> in index.html to fall back to the stock Hermes look.
+
+   Reference tokens come from the DeepSeek Harness design system:
+     bg base   #0f0f0f   layer-1 #1e1f20   layer-2 #282a2c   layer-3 #333537
+     sidebar   #1f1f1f   label   #e3e3e3   secondary #c4c7c5  tertiary #9aa0a6
+     brand     #a8c7fa (dark) / #4176e6 (light)
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ── Light palette ───────────────────────────────────────────────────────── */
+:root{
+  --bg:#ffffff;--sidebar:#f6f8fb;--surface:#ffffff;--surface-subtle:#f0f4f9;--surface-subtle-hover:#e9eef6;
+  --border:rgba(0,0,0,.06);--border2:rgba(0,0,0,.12);--border-subtle:rgba(0,0,0,.045);--border-muted:rgba(0,0,0,.10);
+  --text:#0f1115;--strong:#0f1115;--muted:#61666b;--em:#3c3c3d;
+  --accent:#4176e6;--accent-hover:#3563c9;--accent-bg:rgba(65,118,230,.10);--accent-bg-strong:rgba(65,118,230,.18);--accent-text:#3563c9;
+  --blue:#4176e6;--gold:#4176e6;--focus-ring:rgba(65,118,230,.28);--focus-glow:rgba(65,118,230,.10);
+  --input-bg:#ffffff;--hover-bg:rgba(38,49,72,.06);--code-bg:#f9fafb;--code-inline-bg:#f5f5f5;--code-text:#0f1115;--pre-text:#0f1115;
+  --topbar-bg:rgba(255,255,255,.92);--main-bg:#ffffff;
+  --error:#ec1313;--success:#22c55e;--warning:#dd8629;--info:#4176e6;
+  --user-bubble-bg:#eef4fe;--user-bubble-border:transparent;--user-bubble-text:#0f1115;--user-bubble-placeholder:#61666b;
+  --user-selection-bg:rgba(65,118,230,.22);--user-selection-text:#0f1115;
+
+  /* Harness-specific chrome */
+  --hns-rail-bg:#eff2f7;--hns-new-chat-bg:#e4e9ee;--hns-search-bg:#eef1f6;
+  --hns-session-hover:#eef1f6;--hns-session-active:#e4e9ee;
+  --hns-glow:rgba(65,118,230,.07);--hns-accent-on:#ffffff;
+  --hns-scroll-thumb:rgba(0,0,0,.16);--hns-scroll-thumb-hover:rgba(0,0,0,.26);
+  --hns-composer-shadow:0 1px 3px rgba(60,64,67,.16),0 4px 14px 2px rgba(60,64,67,.09);
+
+  --radius-sm:6px;--radius-md:10px;--radius-card:12px;--radius-lg:16px;--radius-pill:999px;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;
+  --font-size-xs:11px;--font-size-sm:12px;--font-size-md:14px;
+  --message-body-font-size:14px;--message-body-line-height:1.72;
+  --message-code-font-size:13px;--message-pre-code-font-size:12.5px;--message-table-font-size:12.5px;
+  --msg-rail:0px;--msg-max:100%;
+  --font-ui:"Google Sans","Product Sans",system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Helvetica Neue",Arial,sans-serif;
+  --font-conversation:var(--font-ui);
+  /* Harness code stack, verbatim: on this box it resolves to Liberation Mono,
+     the same face the DeepSeek Harness renders code blocks with. */
+  --font-mono:"SF Mono","JetBrains Mono","Fira Code",Consolas,"Liberation Mono",Menlo,Courier,"PingFang SC","Microsoft YaHei",ui-monospace,monospace;
+}
+
+/* ── Dark palette ────────────────────────────────────────────────────────── */
+:root.dark{
+  --bg:#0f0f0f;--sidebar:#1f1f1f;--surface:#1e1f20;--surface-subtle:#232324;--surface-subtle-hover:#2c2c2e;
+  --border:rgba(255,255,255,.07);--border2:rgba(255,255,255,.13);--border-subtle:rgba(255,255,255,.05);--border-muted:rgba(255,255,255,.10);
+  --text:#e3e3e3;--strong:#f9fafb;--muted:#9aa0a6;--em:#c4c7c5;
+  --accent:#a8c7fa;--accent-hover:#c3d7fc;--accent-bg:rgba(168,199,250,.12);--accent-bg-strong:rgba(168,199,250,.22);--accent-text:#a8c7fa;
+  --blue:#7aaaff;--gold:#a8c7fa;--focus-ring:rgba(168,199,250,.32);--focus-glow:rgba(168,199,250,.12);
+  --input-bg:#1e1f21;--hover-bg:rgba(255,255,255,.06);--code-bg:#1b1b1c;--code-inline-bg:#2a2a2a;--code-text:#e8e8e8;--pre-text:#e3e3e3;
+  --topbar-bg:rgba(15,15,15,.88);--main-bg:#0f0f0f;
+  --error:#f25a5a;--success:#4ed17e;--warning:#f7ad31;--info:#7aaaff;
+  --user-bubble-bg:#1e1f20;--user-bubble-border:transparent;--user-bubble-text:#e3e3e3;--user-bubble-placeholder:#9aa0a6;
+  --user-selection-bg:rgba(168,199,250,.26);--user-selection-text:#0f1115;
+
+  --hns-rail-bg:#1f1f1f;--hns-new-chat-bg:#171717;--hns-search-bg:#171717;
+  --hns-session-hover:rgba(255,255,255,.06);--hns-session-active:rgba(255,255,255,.08);
+  --hns-glow:rgba(122,170,255,.09);--hns-accent-on:#0f1115;
+  --hns-scroll-thumb:rgba(255,255,255,.14);--hns-scroll-thumb-hover:rgba(255,255,255,.24);
+  --hns-composer-shadow:0 2px 4px rgba(0,0,0,.45),0 10px 30px 6px rgba(0,0,0,.38);
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+html{background:var(--bg);}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
+::selection{background:var(--accent-bg-strong);color:var(--strong);}
+
+/* ── Title bar: quiet, borderless — the sidebar owns the branding ─────────── */
+.app-titlebar{height:40px;background:var(--bg);border-bottom:0;color:var(--muted);font-size:12px;}
+.app-titlebar-title{font-size:12px;font-weight:600;letter-spacing:.01em;color:var(--text);}
+.app-titlebar-sub{color:var(--muted);}
+.app-titlebar-new-chat,.app-titlebar-reload,.app-titlebar-profile{height:28px;min-width:28px;padding:0 6px;border-radius:8px;border:0;background:transparent;color:var(--muted);}
+.app-titlebar-new-chat:hover,.app-titlebar-reload:hover,.app-titlebar-profile:hover{background:var(--hover-bg);color:var(--text);}
+
+/* ── Icon rail ───────────────────────────────────────────────────────────── */
+.rail{width:52px;background:var(--hns-rail-bg);border-right:0;padding:10px 0;gap:2px;}
+.rail .nav-tab,.rail .rail-btn{width:36px;height:36px;min-height:36px;border-radius:10px;color:var(--muted);}
+.rail .nav-tab:hover,.rail .rail-btn:hover{background:var(--hover-bg);color:var(--text);}
+.rail .nav-tab.active,.rail .rail-btn.active{background:var(--hns-session-active);color:var(--strong);}
+.rail .nav-tab.active::before,.rail .rail-btn.active::before{display:none;}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+.sidebar{width:280px;background:var(--sidebar);border-right:0;}
+/* The Harness left zone is ONE flat full-height panel: no darker icon rail seam,
+   and no top bar cutting the sidebar off. Blend the chrome into one surface. */
+.rail{background:var(--sidebar);}
+#panelChat .panel-head,#panelSessions .panel-head{background:var(--sidebar);}
+.app-titlebar{
+  background:linear-gradient(90deg,var(--sidebar) 0,var(--sidebar) 332px,var(--bg) 332px,var(--bg) 100%);
+  border-bottom:0;
+}
+.app-titlebar .app-titlebar-inner{display:none;}
+.sidebar .panel-head{min-height:44px;padding:10px 14px;border-bottom:0;font-size:14px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted);}
+.new-chat-btn{height:36px;padding:0 14px;margin-bottom:10px;border-radius:var(--radius-pill);background:var(--hns-new-chat-bg);border:1px solid transparent;color:var(--text);font-size:13px;font-weight:500;gap:10px;justify-content:flex-start;}
+.new-chat-btn:hover{background:var(--hns-session-active);border-color:transparent;}
+.sidebar-search-field,.session-search-field{border-radius:var(--radius-pill);background:var(--hns-search-bg);border:1px solid transparent;}
+.sidebar-search-field:focus-within,.session-search-field:focus-within{border-color:var(--border2);background:var(--hns-search-bg);}
+.session-item{border-radius:var(--radius-pill);padding:6px 12px;margin-bottom:2px;font-size:13.5px;color:var(--em);}
+.session-item:hover{background:var(--hns-session-hover);color:var(--text);}
+.session-item.active{background:var(--hns-session-active);color:var(--strong);}
+.session-item.active::before{display:none;}
+.session-time,.session-meta{color:var(--muted);}
+
+/* ── Main column ─────────────────────────────────────────────────────────── */
+.main{background:var(--main-bg);border:0;}
+.messages{background:var(--main-bg);}
+/* Soft accent glow behind the empty state, like the Harness landing view. */
+.messages:has(.empty-state)::after{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(52% 46% at 50% 34%,var(--hns-glow),transparent 72%);}
+.messages-inner{max-width:var(--hns-chat-width,845px);padding:18px 32px 28px;}
+.empty-state h2{font-size:20px;font-weight:600;letter-spacing:-.01em;}
+
+/* ── Messages ────────────────────────────────────────────────────────────── */
+/* Vertical rhythm. The app stacks .msg-row (8px) inside .assistant-turn (8px) and
+   each paragraph carries a 12px tail, so two lines of prose sat ~32px apart and a
+   thinking card added 6px of air on both sides plus 5px header padding. One small
+   gap per nesting level instead: turn → 2px, row → 3px, paragraph → 8px. */
+.msg-row{padding:3px 0;}
+.assistant-turn{padding:2px 0;}
+.msg-role{font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);opacity:1;margin-bottom:4px;}
+.msg-role.user,.msg-role.assistant{color:var(--muted);opacity:1;}
+.role-icon{width:18px;height:18px;border-radius:6px;background:var(--surface-subtle);border:1px solid var(--border);color:var(--muted);font-size:9px;}
+/* Assistant prose sits flush with the column edge (no avatar indent). */
+.msg-body{padding-left:0;max-width:none;color:var(--text);}
+/* User turn: right-aligned pill bubble. */
+.msg-row[data-role="user"]{max-width:min(640px,78%);}
+.msg-row[data-role="user"] .msg-body{background:var(--user-bubble-bg);border:0;border-radius:20px;padding:10px 16px;color:var(--user-bubble-text);}
+.msg-row[data-role="user"] .msg-role{justify-content:flex-end;}
+.msg-row[data-role="user"] .msg-body code{background:rgba(127,127,127,.16);}
+.msg-time,.msg-usage{color:var(--muted);font-size:11px;}
+
+/* ── Markdown inside messages ────────────────────────────────────────────── */
+.msg-body p{margin-bottom:8px;line-height:var(--message-body-line-height);}
+.msg-body h1,.msg-body h2,.msg-body h3,.msg-body h4,.msg-body h5,.msg-body h6{font-weight:600;color:var(--strong);}
+.msg-body h1{font-size:24px;margin:22px 0 10px;border-bottom:0;padding-bottom:0;}
+.msg-body h2{font-size:20px;margin:20px 0 8px;border-bottom:0;padding-bottom:0;}
+.msg-body h3{font-size:17px;margin:18px 0 8px;}
+.msg-body h4{font-size:15px;margin:16px 0 6px;}
+.msg-body a{color:var(--accent-text);text-decoration:none;}
+.msg-body a:hover{text-decoration:underline;}
+.msg-body code{background:var(--code-inline-bg);border-radius:6px;padding:1.5px 6px;font-size:var(--message-code-font-size);color:var(--code-text);}
+.msg-body pre{background:var(--code-bg);border:1px solid var(--border);border-radius:16px;padding:14px 16px;margin:8px 0;}
+.msg-body pre code{background:none;padding:0;border-radius:0;color:var(--pre-text);}
+/* Tables read as prose, not as machine output: style.css puts .msg-body table
+   in the mono stack alongside code and pre — the Harness keeps tables in the
+   UI face, so opt the table (and its cells, which inherit) back out. */
+.msg-body table{font-family:var(--font-conversation);font-size:var(--message-table-font-size);border-collapse:collapse;margin:12px 0;}
+.msg-body th{background:var(--surface-subtle);border:1px solid var(--border);padding:7px 10px;font-weight:600;color:var(--strong);}
+.msg-body td{border:1px solid var(--border);padding:7px 10px;}
+.msg-body tr:nth-child(even){background:transparent;}
+.msg-body blockquote{border-left:2px solid var(--border-muted);color:var(--muted);padding-left:14px;margin:8px 0;}
+.msg-body hr{border:0;border-top:1px solid var(--border);margin:18px 0;}
+
+/* ── Tool / disclosure rows ──────────────────────────────────────────────── */
+.tool-card-header{border-radius:8px;padding:4px 8px;color:var(--muted);}
+.tool-card-header:hover{background:var(--hover-bg);}
+.tool-card-name{font-size:13px;color:var(--muted);}
+.msg-body ul,.msg-body ol{margin:4px 0 8px 20px;}
+.msg-body li{margin-bottom:2px;}
+.msg-body table{margin:8px 0;}
+
+/* ── Composer ────────────────────────────────────────────────────────────── */
+.composer-wrap{background:transparent;padding:6px 16px 14px;}
+.composer-box{max-width:var(--hns-chat-width,845px);background:var(--input-bg);border:0;border-radius:28px;box-shadow:var(--hns-composer-shadow);padding:8px 0 0;}
+.composer-box:focus-within{border:0;box-shadow:var(--hns-composer-shadow),0 0 0 1px var(--border2);}
+.composer-wrap.drag-over .composer-box{box-shadow:var(--hns-composer-shadow),0 0 0 2px var(--accent);}
+#msg,textarea#msg{font-size:14px;line-height:24px;padding:10px 18px 2px;color:var(--text);}
+textarea#msg::placeholder{color:var(--muted);}
+.composer-footer{padding:4px 12px 10px;}
+.composer-footer button{border-radius:var(--radius-pill);}
+.attach-chip{border-radius:var(--radius-pill);background:var(--surface-subtle);border-color:var(--border);color:var(--muted);}
+
+/* Send: the one saturated control in the UI — light blue circle, dark glyph. */
+.send-btn{background:var(--accent);color:var(--hns-accent-on);border:0;box-shadow:none;}
+.send-btn:hover:not(:disabled){background:var(--accent-hover);box-shadow:none;}
+.send-btn:disabled{background:var(--surface-subtle);color:var(--muted);opacity:1;}
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+*{scrollbar-width:thin;scrollbar-color:var(--hns-scroll-thumb) transparent;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--hns-scroll-thumb);border-radius:999px;border:2px solid transparent;background-clip:padding-box;}
+::-webkit-scrollbar-thumb:hover{background:var(--hns-scroll-thumb-hover);background-clip:padding-box;}
+
+/* ── Narrow viewports ────────────────────────────────────────────────────── */
+@media(max-width:768px){
+  .messages-inner{padding:12px 16px 20px;}
+  .composer-wrap{padding:4px 10px 10px;}
+  .composer-box{border-radius:24px;}
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Conversation column resize handles
+   Mirrors the Harness behaviour: a transparent 10px hit strip sits just
+   outside each edge of the reading column (which stays centred), shows a 2px
+   vertical indicator only near the pointer while hovered/dragged, and drags
+   the column wider/narrower symmetrically. The drag itself lives in
+   static/harness-theme.js — this file only draws the affordance.
+   ═════════════════════════════════════════════════════════════════════════ */
+#mainChat{position:relative;}
+.hns-width-handle{position:absolute;top:0;bottom:0;z-index:6;width:10px;cursor:col-resize;touch-action:none;}
+/* 6px keeps the strip just outside the column's edge — near enough to feel like
+   part of the composer, far enough not to sit over its rounded corner. */
+.hns-width-handle[data-side="left"]{right:calc(50% + var(--hns-chat-width,845px) / 2 + 6px);}
+.hns-width-handle[data-side="right"]{left:calc(50% + var(--hns-chat-width,845px) / 2 + 6px);}
+.hns-width-handle::after{content:"";position:absolute;top:0;bottom:0;width:2px;border-radius:2px;pointer-events:none;opacity:0;transition:opacity .12s ease;
+  background:linear-gradient(to bottom,
+    transparent calc(var(--hns-pointer-y,50%) - 36px),
+    var(--border-muted) calc(var(--hns-pointer-y,50%) - 8px),
+    var(--border-muted) calc(var(--hns-pointer-y,50%) + 8px),
+    transparent calc(var(--hns-pointer-y,50%) + 36px));}
+.hns-width-handle[data-side="left"]::after{right:4px;}
+.hns-width-handle[data-side="right"]::after{left:4px;}
+.hns-width-handle:hover::after,.hns-width-handle[data-dragging]::after{opacity:1;}
+.hns-width-handle[data-dragging]{z-index:8;}
+/* Hidden where there is no room to drag, and while a full-height overlay
+   (approval / clarify card) owns the column. */
+@media(max-width:1100px){.hns-width-handle{display:none;}}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Model picker menu
+   ═════════════════════════════════════════════════════════════════════════ */
+:root{--hns-menu-bg:#ffffff;--hns-menu-shadow:0 12px 36px rgba(15,17,21,.14),0 2px 8px rgba(15,17,21,.08);}
+:root.dark{--hns-menu-bg:#282a2c;--hns-menu-shadow:0 12px 40px rgba(0,0,0,.5),0 2px 8px rgba(0,0,0,.35);}
+
+.model-dropdown{
+  background:var(--hns-menu-bg);border:1px solid var(--border2);border-radius:14px;padding:6px 6px 8px;
+  min-width:340px;max-width:min(460px,calc(100vw - 32px));
+  box-shadow:var(--hns-menu-shadow);max-height:min(70vh,620px);
+}
+.model-dropdown.model-dropdown--floating{border-radius:14px;}
+.model-dropdown .model-search-row{background:transparent;padding:4px 6px;}
+.model-dropdown .model-search-row input{border-radius:var(--radius-pill);background:var(--hover-bg);border:1px solid var(--border);font-size:12.5px;}
+.model-dropdown .model-search-row input:focus{border-color:var(--border2);background:var(--hover-bg);}
+.model-dropdown .model-search-clear{border-color:transparent;background:transparent;color:var(--muted);}
+.model-dropdown .model-search-clear:hover{background:var(--hover-bg);color:var(--text);}
+.model-custom-row{padding:2px 6px 6px;margin-bottom:4px;border-bottom:1px solid var(--border);}
+.model-custom-input{border-radius:8px;background:var(--hover-bg);border:1px solid var(--border);color:var(--text);font-size:12.5px;}
+.model-custom-input:focus{border-color:var(--border2);}
+.model-custom-btn{border-color:transparent;background:transparent;color:var(--muted);}
+.model-custom-btn:hover{background:var(--hover-bg);color:var(--text);}
+.model-scope-note{position:sticky;top:0;background:var(--hns-menu-bg);border-bottom:0;box-shadow:none;padding:5px 8px 3px;font-size:10.5px;font-weight:600;color:var(--muted);}
+.model-group{padding:8px 8px 3px;border-top:0;margin-top:0;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-transform:none;color:var(--muted);}
+.model-group.collapsible{padding:6px 8px;border-radius:7px;transition:background .12s,color .12s;}
+.model-group.collapsible:hover{background:var(--hover-bg);color:var(--text);}
+/* Fixed-width caret so header text and model names share one left edge. */
+.model-group.collapsible::before{display:inline-block;width:10px;margin-right:6px;font-size:8px;text-align:center;opacity:.7;}
+.model-group.sub{padding:1px 8px 1px 24px;font-size:10px;}
+.model-group-body.sub{padding-left:6px;border-left:1px solid var(--border);}
+/* Compact single-line rows: the model id rides along on the right instead of
+   taking a second line, so a 620px menu shows ~20 models instead of ~12.
+   24px left padding lines the name up with the group header text (8 + 10 caret + 6). */
+.model-opt{flex-direction:row;align-items:center;gap:8px;padding:4px 10px 4px 24px;border-radius:7px;transition:background .12s;}
+.model-opt:hover{background:var(--hover-bg);}
+.model-opt.is-highlighted{background:var(--hover-bg);outline:0;}
+.model-opt.active{background:var(--accent-bg);}
+.model-opt.active.is-highlighted{background:var(--accent-bg);outline:0;}
+.model-opt-top{flex:1 1 auto;min-width:0;gap:6px;margin:0;flex-wrap:nowrap;overflow:hidden;}
+.model-opt-name{font-size:12.5px;font-weight:500;line-height:1.35;color:var(--em);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;}
+/* Name and provider chip share one tone (secondary, not body-white); hover and
+   selection lift it one more step so the row still reacts. */
+.model-opt:hover .model-opt-name,.model-opt.is-highlighted .model-opt-name{color:var(--text);}
+.model-opt.active .model-opt-name{color:var(--text);}
+.model-opt-id{flex:0 0 auto;max-width:42%;font-size:10.5px;line-height:1.35;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;}
+.model-opt-badge{flex:0 0 auto;border:0;border-radius:var(--radius-pill);padding:0 6px;font-size:9px;line-height:15px;font-weight:600;letter-spacing:.02em;text-transform:none;}
+.model-opt-badge--primary{background:var(--accent-bg);color:var(--accent-text);}
+.model-opt-badge--fallback{background:rgba(247,173,49,.14);color:var(--warning);}
+.model-opt-badge--selected{background:var(--accent-bg);color:var(--accent-text);}
+.model-opt-provider{flex:0 0 auto;margin-left:auto;background:var(--hover-bg);border:0;border-radius:var(--radius-pill);padding:0 6px;font-size:9px;line-height:15px;font-weight:500;letter-spacing:.02em;color:var(--em);}
+.model-provider-hint{margin:2px 6px 4px;padding:5px 8px;border:1px solid var(--border);background:var(--surface-subtle);border-radius:8px;font-size:10.5px;line-height:1.35;color:var(--muted);}
+.model-opt-more{border-radius:7px;padding:5px 8px 5px 14px;font-size:11px;}
+.model-opt-more:hover,.model-opt-more.is-highlighted{background:var(--hover-bg);color:var(--accent-text);}
+
+/* The chip that opens the picker: quiet pill, tinted while the menu is open. */
+.composer-model-chip{border-radius:var(--radius-pill);padding:5px 9px;color:var(--em);gap:6px;}
+.composer-model-chip:hover{background:var(--hover-bg);color:var(--text);}
+.composer-model-chip.active{background:var(--hover-bg);color:var(--text);border-color:transparent;}
+
+/* ── Typeface: the Harness UI stack ─────────────────────────────────────────
+   The app's default stack starts with "Google Sans"/system-ui, which Chrome
+   resolves to DejaVu Sans on this box — much wider and rounder than the Harness.
+   The Harness chain falls through Unavailable Apple/Segoe families to
+   Helvetica/Arial, i.e. Nimbus/Liberation Sans, and to Noto Sans CJK for 中文. */
+:root,
+:root.dark,
+:root.light{
+  --font-ui:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Helvetica Neue",Helvetica,Arial,"Noto Sans CJK SC",sans-serif;
+  --font-conversation:var(--font-ui);
+}
+body,
+button,
+input,
+select,
+textarea,
+#sessionList .session-item,
+#sessionList .session-date-header,
+#btnNewChat,
+.sidebar{font-family:var(--font-ui);}
+
+/* ── Sidebar: one merged list, grouped by workspace ─────────────────────────
+   The Chat panel head becomes the Harness "New chat" row: no title label, one
+   full-width button with an icon and a text label. */
+#panelChat .panel-head{display:block;min-height:0;padding:12px 12px 6px;color:var(--text);}
+#panelChat .panel-head > span{display:none;}
+#panelChat .panel-head-actions{display:block;width:100%;}
+#panelChat #btnNewChat{
+  width:100%;height:36px;display:flex;align-items:center;justify-content:center;gap:8px;
+  border-radius:10px;background:var(--hns-new-chat-bg);border:1px solid transparent;
+  color:var(--text);font-size:14px;font-weight:400;letter-spacing:0;padding:0 12px;
+  box-shadow:none;transition:background .12s,border-color .12s,color .12s;
+}
+#panelChat #btnNewChat svg{width:16px;height:16px;flex:0 0 auto;stroke-width:2;}
+#panelChat #btnNewChat .hns-newchat-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#panelChat #btnNewChat:hover{background:#232324;border-color:transparent;color:var(--strong);}
+#panelChat #btnNewChat:active{transform:none;}
+/* The button carries its own label now; the hover tooltip would double it. */
+#panelChat #btnNewChat.has-tooltip::after,#panelChat #btnNewChat.has-tooltip::before{display:none;}
+#panelChat .session-search.sidebar-search{padding:2px 12px 8px;}
+/* Project filter: the Harness renders filters as ONE segmented control on
+   layer-1 with a hairline inset ring — not a row of bordered pills with a blue
+   active chip (that accent fill is what makes our list read as another app). */
+#panelChat .project-bar{
+  margin:0 0 8px;padding:2px;gap:2px;flex-wrap:nowrap;
+  border-radius:8px;background:var(--surface);
+  box-shadow:inset 0 0 0 .5px rgba(255,255,255,.1);
+}
+#panelChat .project-bar .project-chip,
+#panelChat .project-bar .project-create-btn{
+  height:24px;padding:0 10px;border:0;border-radius:6px;background:transparent;
+  font-size:12px;font-weight:400;color:var(--muted);opacity:1;
+}
+#panelChat .project-bar .project-chip.active{background:var(--surface-subtle);color:var(--text);}
+#panelChat .project-bar .project-chip:hover,
+#panelChat .project-bar .project-create-btn:hover{background:var(--hover-bg);color:var(--text);}
+#panelChat .project-bar .project-create-btn{width:24px;padding:0;justify-content:center;}
+
+/* ── Sidebar tree, Harness-style ────────────────────────────────────────────
+   Workspace header = folder icon + chevron + title, sessions indented beneath
+   it as tree children with a relative time on the right and actions on hover. */
+#sessionList .session-date-group{margin:0;}
+#sessionList .session-date-body{padding:0;}
+/* Rows share the "new chat" button / search field's left edge (10px), so the tree
+   lines up with the chrome above it instead of sitting 2px out. */
+#panelChat #sessionList{padding-left:12px;padding-right:12px;}
+
+#sessionList .session-date-header{
+  position:relative;
+  display:flex;align-items:center;gap:0;
+  height:36px;min-height:36px;padding:0 8px;margin:0;border-radius:8px;
+  font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;
+  color:var(--strong);opacity:1; /* the app dims the whole header to .8, which
+     quietly cancels the white label */
+  white-space:nowrap;overflow:hidden;cursor:pointer;
+  transition:background .12s,color .12s;
+}
+#sessionList .session-date-header:hover{background:var(--hover-bg);color:var(--strong);}
+#sessionList .session-date-header > span:last-of-type{flex:1 1 auto;min-width:0;margin-left:4px;overflow:hidden;text-overflow:ellipsis;}
+/* folder glyph — masked so it inherits the row's colour */
+#sessionList .session-date-header.hns-ws-group::before,
+#sessionList .session-date-header.pinned::before{
+  content:"";flex:0 0 auto;width:16px;height:16px;background:currentColor;opacity:.55;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.55 4.15c0-.9.73-1.62 1.62-1.62h1.6c.43 0 .85.17 1.15.48l.93.93c.09.09.21.14.34.14h3.63c.9 0 1.62.73 1.62 1.62v5.6c0 .9-.73 1.62-1.62 1.62H4.17c-.9 0-1.62-.73-1.62-1.62v-7.15Z'/%3E%3C/svg%3E") center/16px 16px no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.55 4.15c0-.9.73-1.62 1.62-1.62h1.6c.43 0 .85.17 1.15.48l.93.93c.09.09.21.14.34.14h3.63c.9 0 1.62.73 1.62 1.62v5.6c0 .9-.73 1.62-1.62 1.62H4.17c-.9 0-1.62-.73-1.62-1.62v-7.15Z'/%3E%3C/svg%3E") center/16px 16px no-repeat;
+}
+#sessionList .session-date-header:hover::before{opacity:.9;}
+/* Pinned is not a workspace: give it a pin, not a folder. */
+#sessionList .session-date-header.pinned::before{
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M9.97 1.7l3.19 2.23-2.26 4.19.62 3.48-.8 1.14-8.19-5.74.8-1.14 3.48-.61L9.97 1.7Zm-3.92 7.77c.22-.31.65-.39.97-.17.31.22.39.65.17.97l-3.2 4.2-.78-.55 2.84-4.45Z'/%3E%3C/svg%3E") center/16px 16px no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M9.97 1.7l3.19 2.23-2.26 4.19.62 3.48-.8 1.14-8.19-5.74.8-1.14 3.48-.61L9.97 1.7Zm-3.92 7.77c.22-.31.65-.39.97-.17.31.22.39.65.17.97l-3.2 4.2-.78-.55 2.84-4.45Z'/%3E%3C/svg%3E") center/16px 16px no-repeat;
+}
+/* the DOM caret is a text glyph; swap it for a real chevron */
+#sessionList .session-date-header .session-date-caret{
+  font-size:0;line-height:0;color:inherit;opacity:.5;
+  width:14px;height:14px;flex:0 0 auto;background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6.2 4.2 10.6 8l-4.4 3.8z'/%3E%3C/svg%3E") center/14px 14px no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6.2 4.2 10.6 8l-4.4 3.8z'/%3E%3C/svg%3E") center/14px 14px no-repeat;
+  transform:rotate(90deg);transition:transform .12s;
+}
+#sessionList .session-date-header:hover .session-date-caret{opacity:.8;}
+#sessionList .session-date-header .session-date-caret.collapsed{transform:rotate(0deg);}
+
+/* tree children: 8px row padding + 16px folder + 6px gap = text lines up under the title */
+#sessionList .session-item{
+  position:relative;
+  display:flex;align-items:stretch;
+  /* 36px is a LINE height, not the row height: the child-session list and the
+     lineage segments are block columns appended inside .session-text, so a fixed
+     row height makes them overflow their own row and paint over the neighbours. */
+  height:auto;min-height:36px;padding:0 30px 0 42px;margin-bottom:1px;border:0!important;border-radius:8px;
+  font-size:14px;line-height:1.35;color:var(--em);background:transparent;
+  gap:6px;transition:background .12s,color .12s;
+}
+/* Status/lineage glyphs get their own slot so a branch or chain icon can never
+   push one title to the right of its siblings. */
+#sessionList .session-item .session-attention-indicator,
+#sessionList .session-item .session-state-indicator,
+#sessionList .session-item .session-branch-indicator,
+#sessionList .session-item .session-worktree-indicator{
+  /* pinned to the title line, not to the row box: an expanded child list makes the
+     row tall and top:50% would drop the glyph into the middle of that list */
+  position:absolute;left:26px;top:18px;transform:translateY(-50%);margin:0;
+  width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;
+}
+#sessionList .session-item:hover{background:var(--hover-bg);}
+#sessionList .session-item.active{background:var(--hover-bg);}
+#sessionList .session-item .session-text{
+  flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center;min-height:36px;
+}
+#sessionList .session-item .session-title-row{min-height:36px;gap:6px;min-width:0;align-items:center;}
+#sessionList .session-item .session-title{
+  font-size:14px;font-weight:400;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#sessionList .session-item:hover .session-title{color:var(--strong);}
+#sessionList .session-item.active .session-title{color:var(--strong);font-weight:400;}
+/* the source chip is debug chrome in a workspace tree */
+#sessionList .session-item .session-source-chip,
+#sessionList .session-item .session-meta{display:none!important;}
+#sessionList .session-item .session-time{
+  flex:0 0 auto;margin-left:auto;padding-left:6px;
+  font-size:12px;line-height:1;color:var(--muted);
+  opacity:0;transition:opacity .12s;
+  /* stay on the title line even when an expanded child list makes the row tall */
+  align-self:flex-start;min-height:36px;display:flex;align-items:center;
+}
+#sessionList .session-item:hover .session-time,
+#sessionList .session-item.active .session-time{opacity:1;}
+#sessionList .session-item:hover .session-time{color:var(--em);}
+/* Expanded child-session / lineage lists stack INSIDE the row. Give them the
+   tree look instead of the app's 11px gray, and keep them inside the row's own
+   background so nothing reads as overlapping. */
+#sessionList .session-child-sessions,
+#sessionList .session-lineage-segments{
+  margin:2px 0 6px;margin-left:0;padding-left:10px;
+  border-left:1px solid rgba(255,255,255,.09);
+}
+#sessionList .session-child-session,
+#sessionList .session-lineage-segment{
+  font-family:var(--font-ui);font-size:12.5px;color:var(--em);
+  padding:4px 6px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#sessionList .session-child-session:hover,
+#sessionList .session-lineage-segment:hover,
+#sessionList .session-lineage-segment.active{background:var(--hover-bg);color:var(--text);}
+#sessionList .session-child-session.active{background:var(--session-active);color:var(--strong);}
+#sessionList .session-child-count,
+#sessionList .session-lineage-count{
+  height:18px;font-size:11px;font-weight:500;padding:0 7px;
+  background:var(--surface-subtle);color:var(--em);
+}
+#sessionList .session-child-count:hover,
+#sessionList .session-lineage-count.expandable:hover{background:var(--hover-bg);color:var(--text);}
+/* row actions only on hover, like the Harness ellipsis */
+#sessionList .session-item .session-actions{
+  opacity:0;transition:opacity .12s;
+  align-self:flex-start;min-height:36px;display:flex;align-items:center;
+}
+#sessionList .session-item:hover .session-actions,
+#sessionList .session-item.menu-open .session-actions,
+#sessionList .session-item.active .session-actions{opacity:1;}
+#sessionList .session-item .session-actions-trigger{width:22px;height:22px;border-radius:6px;color:var(--muted);}
+#sessionList .session-item .session-actions-trigger:hover{background:var(--hover-bg);color:var(--text);}
+
+/* per-workspace "+" (injected by harness-theme.js), shown on header hover */
+#sessionList .session-date-header .hns-ws-add{
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;padding:0;border:0;border-radius:6px;background:transparent;
+  color:var(--muted);cursor:pointer;opacity:0;transition:opacity .12s,background .12s,color .12s;
+}
+#sessionList .session-date-header:hover .hns-ws-add,
+#sessionList .session-date-header .hns-ws-add:focus-visible{opacity:1;}
+/* keep the title clear of the button so hover never re-truncates it */
+/* hover clearance for the absolute + button: reserve it on the row, not on a
+   child, so the left edge of the name never shifts */
+#sessionList .session-date-header:hover{padding-right:30px;}
+/* Real folder element (the ::before is only a decoration; this one is clickable
+   so the workspace path can be copied). Kept at the same 16px slot so the
+   workspace label and the session titles below it still share one text column. */
+#sessionList .session-date-header.hns-iconified::before{content:normal;width:0;height:0;background:none;-webkit-mask:none;mask:none;}
+#sessionList .session-date-header > .hns-ws-label{
+  flex:1 1 auto;min-width:0;margin-left:4px;
+  overflow:hidden;text-overflow:ellipsis;
+}
+#sessionList .session-date-header .hns-ws-icon{
+  flex:0 0 auto;width:16px;height:16px;background:currentColor;opacity:.55;cursor:pointer;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.55 4.15c0-.9.73-1.62 1.62-1.62h1.6c.43 0 .85.17 1.15.48l.93.93c.09.09.21.14.34.14h3.63c.9 0 1.62.73 1.62 1.62v5.6c0 .9-.73 1.62-1.62 1.62H4.17c-.9 0-1.62-.73-1.62-1.62v-7.15Z'/%3E%3C/svg%3E") center/16px 16px no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2.55 4.15c0-.9.73-1.62 1.62-1.62h1.6c.43 0 .85.17 1.15.48l.93.93c.09.09.21.14.34.14h3.63c.9 0 1.62.73 1.62 1.62v5.6c0 .9-.73 1.62-1.62 1.62H4.17c-.9 0-1.62-.73-1.62-1.62v-7.15Z'/%3E%3C/svg%3E") center/16px 16px no-repeat;
+  transition:opacity .12s,color .12s;
+}
+#sessionList .session-date-header:hover .hns-ws-icon{opacity:.9;}
+#sessionList .session-date-header .hns-ws-icon:focus-visible{outline:2px solid var(--accent);outline-offset:2px;opacity:1;}
+/* the workspace that owns the open conversation reads as "you are here" */
+#sessionList .session-date-header.hns-ws-current{color:var(--strong);}
+#sessionList .session-date-header.hns-ws-current .hns-ws-icon{color:var(--accent);opacity:1;}
+/* Nothing is appended after the workspace name — the address lives in a hover
+   bubble, exactly like the Harness tooltip (_bubble_12mhf_1: padding 3px 7px,
+   radius --dsw-radius-sm 8px, 13px/20px, #fff on --dsw-alias-tooltip-bg
+   #43454a dark / #2c2c2e light, max-width 50vw, .15s fade, position fixed).
+   One deliberate deviation: the Harness bubble is pointer-events:none, ours must
+   be clickable because clicking it is how you copy the path. */
+.hns-ws-tip{
+  /* Harness tooltip surface (_bubble_12mhf_1 + --dsw-alias-tooltip-bg), widened
+     into a fixed-width card: a deep path must wrap instead of stretching the
+     bubble across the window. */
+  --hns-tip-bg:#43454a;--hns-tip-fg:#fff;
+  position:fixed;z-index:100;display:none;flex-direction:column;align-items:stretch;gap:4px;
+  left:0;top:0;box-sizing:border-box;width:300px;max-width:calc(100vw - 24px);padding:8px 10px;
+  border-radius:8px;background:var(--hns-tip-bg);color:var(--hns-tip-fg);
+  font-family:var(--font-ui);font-size:13px;font-weight:400;line-height:20px;
+  letter-spacing:0;text-transform:none;white-space:normal;overflow-wrap:break-word;
+  box-shadow:0 6px 18px rgba(0,0,0,.32);cursor:pointer;
+}
+:root.light .hns-ws-tip{--hns-tip-bg:#2c2c2e;--hns-tip-fg:#fff;}
+.hns-ws-tip.is-visible{display:flex;animation:hns-tip-in .15s var(--hns-ease,cubic-bezier(.4,0,.2,1));}
+/* the hover bridge: keeps the bubble alive while the pointer crosses into it */
+.hns-ws-tip::before{content:"";position:absolute;top:0;bottom:0;left:-10px;width:10px;}
+.hns-ws-tip.is-flipped::before{left:auto;right:-10px;}
+.hns-ws-tip-head{display:flex;align-items:baseline;gap:6px;min-width:0;}
+.hns-ws-tip-name{
+  /* the name carries the emphasis — the user asked for 名称着重显示 */
+  min-width:0;font-size:14px;font-weight:600;line-height:20px;color:var(--hns-tip-fg);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.hns-ws-tip-count{flex:0 0 auto;font-size:12px;font-weight:400;line-height:20px;color:rgba(255,255,255,.6);}
+.hns-ws-tip-path{
+  font-size:12px;font-weight:400;line-height:17px;color:rgba(255,255,255,.72);
+  overflow-wrap:break-word;word-break:normal;
+  -webkit-user-select:text;user-select:text;cursor:text;
+}
+.hns-ws-tip-rows{display:grid;grid-template-columns:max-content 1fr;gap:1px 10px;margin-top:2px;}
+.hns-ws-tip-k{font-size:12px;line-height:19px;color:rgba(255,255,255,.6);white-space:nowrap;}
+.hns-ws-tip-v{font-size:12.5px;line-height:19px;color:var(--hns-tip-fg);}
+.hns-ws-tip-foot{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;
+  padding-top:6px;border-top:1px solid rgba(255,255,255,.1);}
+.hns-ws-tip-hint{font-size:11px;line-height:15px;color:rgba(255,255,255,.42);}
+.hns-ws-tip-copy{
+  flex:0 0 auto;display:inline-flex;align-items:center;height:18px;padding:0 6px;border:0;
+  border-radius:4px;background:rgba(255,255,255,.14);color:var(--hns-tip-fg);
+  font-family:var(--font-ui);font-size:11px;line-height:18px;cursor:pointer;
+}
+.hns-ws-tip-copy:hover{background:rgba(255,255,255,.26);}
+.hns-ws-tip.is-copied .hns-ws-tip-copy{background:rgba(168,199,250,.34);}
+@keyframes hns-tip-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.hns-ws-tip.is-visible{animation:none;}}
+#sessionList .session-date-header .hns-ws-rename-input{
+  flex:1 1 auto;min-width:0;height:24px;margin-left:4px;padding:0 6px;
+  border:1px solid var(--border2);border-radius:6px;background:var(--input-bg);
+  color:var(--text);font-family:var(--font-ui);font-size:14px;outline:none;
+}
+#sessionList .session-date-header .hns-ws-rename-input:focus{border-color:var(--accent);}
+#sessionList .session-date-header .hns-ws-add:hover{background:var(--hover-bg);color:var(--text);}
+#sessionList .session-date-header .hns-ws-add svg{display:block;}
+
+/* ── view-options menu + add-workspace picker (harness-theme.js) ───────────── */
+#sessionList[data-hns-group-mode="flat"] .session-date-header{display:none;}
+.hns-menu,.hns-picker{
+  position:fixed;z-index:9999;display:none;
+  background:var(--surface-subtle);border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.52);
+  font-family:var(--font-ui);color:var(--text);
+}
+.hns-menu.is-open,.hns-picker.is-open{display:block;}
+.hns-menu{min-width:224px;padding:6px;}
+.hns-menu-label{padding:6px 8px 3px;font-size:11px;font-weight:400;color:var(--muted);letter-spacing:.02em;}
+.hns-menu-sep{height:1px;margin:4px 6px;background:rgba(255,255,255,.08);}
+.hns-menu-item{
+  display:flex;align-items:center;gap:8px;width:100%;height:26px;padding:0 8px;
+  border:0;border-radius:7px;background:transparent;color:var(--em);
+  font-family:var(--font-ui);font-size:13px;font-weight:400;text-align:left;cursor:pointer;
+}
+.hns-menu-item:hover{background:var(--hover-bg);color:var(--text);}
+.hns-menu-item[aria-checked="true"]{color:var(--strong);}
+.hns-menu-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hns-menu-check{flex:0 0 auto;width:14px;display:inline-flex;align-items:center;justify-content:center;color:var(--accent);}
+.hns-picker{width:288px;padding:8px;}
+.hns-picker-input{
+  width:100%;height:28px;margin-bottom:6px;padding:0 8px;
+  border:1px solid var(--border2);border-radius:8px;background:var(--input-bg);
+  color:var(--text);font-family:var(--font-ui);font-size:12.5px;outline:none;
+}
+.hns-picker-input:focus{border-color:var(--accent);}
+.hns-picker-list{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;}
+.hns-picker-item{
+  display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;
+  padding:5px 8px;border:0;border-radius:8px;background:transparent;cursor:pointer;text-align:left;
+height:26px;}
+.hns-picker-item:hover{background:var(--hover-bg);}
+.hns-picker-name{font-size:13px;color:var(--text);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hns-picker-path{font-size:11px;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hns-picker-empty{padding:8px;font-size:12px;color:var(--muted);}
+.hns-picker-foot{display:flex;align-items:center;gap:8px;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.08);}
+.hns-picker-manage{
+  border:0;background:transparent;padding:0;color:var(--muted);
+  font-family:var(--font-ui);font-size:11.5px;cursor:pointer;
+}
+.hns-picker-manage:hover{color:var(--text);}
+.hns-picker-status{flex:1 1 auto;min-width:0;text-align:right;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hns-picker-crumb{
+  margin:0 2px 6px;font-size:11px;color:var(--muted);line-height:1.3;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.hns-picker-crumb[hidden]{display:none;}
+.hns-picker-item.hns-picker-file{opacity:.5;cursor:default;}
+.hns-picker-item.hns-picker-file:hover{background:transparent;}
+.hns-picker-item.hns-picker-dir .hns-picker-name{color:var(--text);}
+.hns-picker-up .hns-picker-name{color:var(--muted);}
+/* drill-down picker: primary "use this directory" + the ".." row */
+.hns-picker-choose{
+  flex:0 0 auto;height:26px;padding:0 10px;border:0;border-radius:8px;cursor:pointer;
+  background:color-mix(in srgb,var(--accent) 26%,var(--surface-subtle));
+  color:#fff;font-family:var(--font-ui);font-size:12px;font-weight:600;
+  transition:background .12s;
+}
+.hns-picker-choose:hover{background:color-mix(in srgb,var(--accent) 38%,var(--surface-subtle));}
+.hns-picker-choose:disabled{opacity:.5;cursor:default;}
+.hns-picker-item[hidden]{display:none;}
+
+/* ── sidebar management module (harness-theme.js) ─────────────────────────────
+   Profile switcher + the Harness "工作区" section header. */
+.composer-profile-wrap{display:none!important;}          /* profile chip under the input */
+#composerWorkspaceChip{display:none!important;}          /* dead workspace picker       */
+.hns-profile-row{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  padding:2px 12px 8px;
+}
+.hns-profile-row[hidden]{display:none;}
+.hns-profile-btn{
+  display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;
+  border:1px solid transparent;border-radius:8px;background:transparent;
+  font-family:var(--font-ui);font-size:12.5px;font-weight:400;color:var(--muted);
+  cursor:pointer;transition:background .12s,color .12s,border-color .12s;
+}
+.hns-profile-btn:hover{background:var(--hover-bg);color:var(--em);}
+/* the active profile must read at a glance: filled accent pill + white label +
+   hairline ring, while the inactive ones sit back as bare text */
+.hns-profile-btn.is-active{
+  background:color-mix(in srgb,var(--accent) 22%,var(--surface-subtle));
+  border-color:color-mix(in srgb,var(--accent) 42%,transparent);
+  color:#fff;font-weight:600;
+  box-shadow:inset 0 0 0 .5px color-mix(in srgb,var(--accent) 30%,transparent),0 1px 4px rgba(0,0,0,.28);
+}
+.hns-profile-btn:not(.is-active){color:var(--muted);}
+.hns-profile-btn:not(.is-active):hover{color:var(--text);}
+.hns-profile-btn.is-active .hns-profile-dot.running{background:#5fd07f;box-shadow:0 0 0 2px rgba(95,208,127,.22);}
+.hns-profile-btn.is-busy{opacity:.55;pointer-events:none;}
+.hns-profile-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+.hns-profile-name{max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hns-profile-dot{width:6px;height:6px;border-radius:50%;background:var(--muted);flex:0 0 auto;}
+.hns-profile-dot.running{background:#4ac26b;}
+.hns-sec-header{
+  display:flex;align-items:center;gap:8px;height:30px;padding:0 12px 6px;
+}
+.hns-sec-label{
+  flex:0 0 auto;font-family:var(--font-ui);font-size:12px;font-weight:400;
+  letter-spacing:.02em;color:var(--muted);cursor:default;
+}
+.hns-sec-search{flex:1 1 auto;min-width:0;}
+.hns-sec-actions{flex:0 0 auto;display:flex;align-items:center;gap:2px;}
+.hns-sec-btn{
+  width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;
+  border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;
+  transition:background .12s,color .12s;
+}
+.hns-sec-btn:hover{background:var(--hover-bg);color:var(--text);}
+.hns-sec-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+.hns-sec-btn svg{display:block;}
+/* the relocated search box: it now lives inside the header row, so its own
+   wrapper padding and pill radius go away and the field fits a 30px line */
+#panelChat .hns-sec-header .session-search.sidebar-search{padding:0;background:transparent;}
+#panelChat .hns-sec-header .session-search-field{height:26px;border-radius:8px;}
+#panelChat .hns-sec-header .session-search input,
+#panelChat .hns-sec-header .session-search-field input{height:26px;font-size:12.5px;padding-left:28px;}
+#panelChat .hns-sec-header .sidebar-search-icon{left:9px;width:12px;height:12px;}
+#panelChat .hns-sec-header .session-search .session-search-clear{right:4px;width:20px;height:20px;}
+@media (max-width:760px){
+  .hns-sec-label{display:none;}
+  .hns-profile-btn .hns-profile-name{max-width:84px;}
+}
+
+
+
+/* ══ Transcript rhythm and collapsed disclosures — single source of truth ══════
+   Reasoning and tool rows render through two different shapes (the worklog list and
+   the hydrated anchor-scene row `[data-anchor-scene-row="1"]`), and this browser
+   reports a coarse pointer, so the app's touch rule pins activity summaries to a
+   44px tap target. Every transcript-spacing declaration lives here exactly once,
+   prefixed with #mainChat so `:root[data-skin]` variants cannot outrank it.
+
+   Two rules learned the hard way:
+   - A collapsed disclosure keeps its padding/border: `max-height:0` still paints a
+     strip. Collapsed state therefore uses `display:none`, never negative padding.
+   - Summary rows are pinned to 22px instead of summing paddings, so the rhythm does
+     not drift with line-height, icon size or a wrapped second line. */
+
+/* prose */
+#mainChat .msg-body{padding-top:2px;}
+#mainChat .msg-foot{margin-top:2px;}
+
+/* containers between rows carry no air of their own */
+#mainChat .tool-worklog-list,
+#mainChat .tool-worklog-body,
+#mainChat .tool-call-group-body,
+#mainChat .worklog,
+#mainChat .tool-card-args{margin:0;padding:0;gap:1px;}
+#mainChat .assistant-turn-blocks{display:flex;flex-direction:column;gap:1px;margin:0;padding:0;}
+#mainChat .agent-activity-group,
+#mainChat .tool-worklog-group,
+#mainChat .tool-call-group{margin:0 0 3px;}
+
+/* reasoning row, both render paths */
+#mainChat .agent-activity-thinking,
+#mainChat .agent-activity-thinking[data-anchor-scene-row="1"],
+#mainChat [data-anchor-scene-row="1"]{margin:0;padding:0;}
+#mainChat .thinking-card{margin:0 0 2px var(--msg-rail);border-radius:8px;}
+#mainChat .thinking-card.open{border:1px solid var(--border);background:var(--surface-subtle);}
+#mainChat [data-anchor-scene-row="1"] .thinking-card{margin-left:0;}
+#mainChat .thinking-card-header{height:22px;min-height:22px;padding:0 8px;line-height:18px;box-sizing:border-box;align-items:center;}
+#mainChat .thinking-card-label{line-height:18px;}
+#mainChat .thinking-card.open .thinking-card-body{padding:5px 12px 6px;}
+#mainChat .thinking-card-body pre{margin:0;padding:0;line-height:1.45;}
+
+/* collapsed reasoning = no box and no space */
+#mainChat .thinking-card:not(.open){background:transparent;border-color:transparent;box-shadow:none;padding:0;}
+#mainChat .thinking-card:not(.open) > .thinking-card-body{display:none!important;}
+#mainChat .thinking-card.open > .thinking-card-body{display:block!important;}
+
+/* activity summary rows: one clamped 22px line (touch target neutralised) */
+#mainChat .tool-worklog-summary,
+#mainChat .tool-call-group-summary,
+#mainChat .activity-summary,
+#mainChat .tool-worklog-group[data-tool-worklog-group="1"]:not([data-run-activity-group="1"]) .tool-worklog-summary{
+  height:22px!important;min-height:22px!important;max-height:22px!important;
+  margin:0 0 2px!important;padding:0 8px!important;box-sizing:border-box!important;
+  display:flex!important;align-items:center!important;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#mainChat .tool-worklog-summary > *,
+#mainChat .tool-call-group-summary > *{white-space:nowrap;min-width:0;}
+#mainChat .tool-worklog-summary > span,
+#mainChat .tool-call-group-summary > span{overflow:hidden;text-overflow:ellipsis;}
+#mainChat .tool-worklog-summary .tool-worklog-label,
+#mainChat .tool-call-group-summary .tool-worklog-label{line-height:18px;}
+
+/* tool disclosures: closed means zero height, including the 1px border */
+#mainChat .tool-card{margin:0;}
+#mainChat .tool-card:not(.open) > .tool-card-detail,
+#mainChat .transparent-event-row:not(.open) .tool-card-detail{
+  display:none!important;border-top-width:0!important;margin:0!important;padding:0!important;max-height:0!important;
+}
+#mainChat .tool-card.open > .tool-card-detail{display:block!important;}
+#mainChat .tool-arg-pair{margin:0;padding:0;}
+#mainChat .tool-arg-val:empty,
+#mainChat .tool-arg-key:empty{display:none!important;}
+#mainChat .tool-arg-pair:has(.tool-arg-val:empty){display:none;}
+#mainChat .tool-card:not(.open) .tool-card-more{display:none!important;}
+
+/* empty wrappers never occupy a row */
+#mainChat .tool-card-row:empty,
+#mainChat .wl-step-tools:empty,
+#mainChat .tool-worklog-tools:empty,
+#mainChat .tool-card-args:empty,
+#mainChat .tool-card-result:empty,
+#mainChat .tool-card-detail:empty,
+#mainChat .tool-call-group-body:empty{display:none!important;}
+
+/* touch devices: keep the same 22px rhythm (media queries add no specificity) */
+@media (hover:none) and (pointer:coarse){
+  #mainChat .tool-worklog-summary,
+  #mainChat .tool-call-group-summary{
+    height:22px!important;min-height:22px!important;padding:0 8px!important;
+  }
+  #mainChat .thinking-card-header,
+  #mainChat .tool-card-header,
+  #mainChat .transparent-event-row .thinking-card-header{
+    height:22px!important;min-height:0!important;padding:0 8px!important;
+  }
+}
+
+/* ── session /status tooltip (built by harness-theme.js) ─────────────────────── */
+.hns-sess-tip{width:332px;cursor:default;}
+.hns-sess-tip .hns-ws-tip-v{font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+.hns-sess-tip .hns-ws-tip-path{font-family:var(--font-mono);font-size:11.5px;line-height:16px;}
+.hns-sess-tip .hns-sess-state{color:rgba(255,255,255,.55);}
+.hns-sess-tip .hns-sess-state.is-running{color:#8ee08a;}
+.hns-sess-tip .hns-sess-rows{gap:0 12px;}
+
+.hns-sess-tip .hns-ws-tip-v.hns-sess-id{
+  font-family:var(--font-mono);font-size:11.5px;line-height:17px;
+  -webkit-user-select:text;user-select:text;
+}

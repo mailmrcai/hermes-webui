@@ -522,6 +522,53 @@ def restore_goal_state(session_id: str, snapshot: Any, *, profile_home: str | Pa
         logger.debug("Goal state restore failed for %s: %s", session_id, exc)
 
 
+def note_goal_turn_started(session_id: str, profile_home=None, *, profile_name: str | None = None) -> int:
+    """Count one goal round that has started (see GoalManager.note_turn_started).
+
+    The counter used to move only when the judge ran, so rounds that never got
+    evaluated were invisible and ``max_turns`` under-counted. It now moves when
+    the round starts, which is what the budget actually means.
+    """
+    if profile_home is None and profile_name:
+        try:
+            from api.profiles import _resolve_profile_home_for_name
+            profile_home = _resolve_profile_home_for_name(profile_name)
+        except Exception:
+            profile_home = None
+    mgr = _manager(session_id, profile_home=profile_home)
+    if mgr is None:
+        return 0
+    note = getattr(mgr, "note_turn_started", None)
+    if note is None:
+        return 0
+    try:
+        return int(note() or 0)
+    except Exception:
+        logger.debug("goal turn counter increment failed for %s", session_id, exc_info=True)
+        return 0
+
+
+def undo_goal_turn_started(session_id: str, profile_home=None, *, profile_name: str | None = None) -> int:
+    """Undo one counted round (a start that was rejected after admission)."""
+    if profile_home is None and profile_name:
+        try:
+            from api.profiles import _resolve_profile_home_for_name
+            profile_home = _resolve_profile_home_for_name(profile_name)
+        except Exception:
+            profile_home = None
+    mgr = _manager(session_id, profile_home=profile_home)
+    if mgr is None:
+        return 0
+    undo = getattr(mgr, "undo_turn_started", None)
+    if undo is None:
+        return 0
+    try:
+        return int(undo() or 0)
+    except Exception:
+        logger.debug("goal turn counter decrement failed for %s", session_id, exc_info=True)
+        return 0
+
+
 def goal_command_payload(
     session_id: str,
     args: str = "",
@@ -650,6 +697,42 @@ def has_active_goal(
         return bool(mgr.is_active())
     except Exception as exc:
         logger.debug("goal active-state check failed for session=%s: %s", sid, exc)
+        return False
+
+
+def pause_goal_on_interrupt(
+    session_id: str,
+    *,
+    profile_home: str | Path | None = None,
+    reason: str = "turn interrupted",
+) -> bool:
+    """Pause an ACTIVE goal whose turn was cancelled or interrupted.
+
+    The goal loop only advances from a COMPLETED turn: ``api/streaming.py``
+    settles the turn and then calls :func:`evaluate_goal_after_turn`. A
+    cancelled/interrupted turn never settles, so without this the goal stays
+    ``active`` with ``turns_used`` unchanged and nothing will ever continue it
+    — a zombie goal that looks alive in ``/goal status``.
+
+    Pausing (instead of silently dropping it) makes the state truthful. The
+    user restarts the loop with a fresh ``/goal <text>`` — ``/goal resume``
+    only flips the status back and does not start a turn.
+
+    Returns True when an active goal was paused.
+    """
+    sid = str(session_id or "").strip()
+    if not sid:
+        return False
+    mgr = _manager(sid, profile_home=profile_home)
+    if mgr is None:
+        return False
+    try:
+        if not mgr.is_active():
+            return False
+        mgr.pause(reason=reason)
+        return True
+    except Exception as exc:
+        logger.debug("goal pause-on-interrupt failed for session=%s: %s", sid, exc)
         return False
 
 

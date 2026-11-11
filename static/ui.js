@@ -12438,6 +12438,65 @@ function _normalizeTransferredLiveProse(turn){
   });
   return turn;
 }
+// While a live turn owns the in-progress reply, the SAME turn's persisted
+// assistant rows can also be in the transcript: a mid-stream reload (switch away
+// and back, sidebar reconcile) merges the server's eagerly-checkpointed partial
+// rows in, and renderMessages paints them while the live turn paints the same
+// prose. The user sees the reply twice — `message1 → reply → message2` plus a
+// second copy of the reply below it.
+//
+// Hide the transcript copy, but only when the live node ALREADY shows at least the
+// same text, so the answer can never blank (#5390): the live turn is rebuilt from
+// the run journal, and this runs after it is attached. Only the assistant turn
+// immediately above the live node is considered, and every one of its segments
+// must be covered by the live text — a previous turn's answer (or a partially
+// persisted one) is therefore never touched.
+function _suppressTranscriptRowsOwnedByLiveTurn(sid){
+  if(!sid||typeof S==='undefined'||!S.session) return false;
+  if(String(S.session.session_id||'')!==String(sid)) return false;
+  if(!S.activeStreamId) return false;
+  const inner=$('msgInner');
+  if(!inner) return false;
+  const live=document.getElementById('liveAssistantTurn');
+  if(!live||live.parentElement!==inner) return false;
+  const norm=(value)=>String(value||'').replace(/\s+/g,' ').trim();
+  // Live text = what the user can actually read in the live turn (scene prose rows
+  // and any still-visible live segment). Hidden worklog-source segments excluded.
+  const liveParts=[];
+  live.querySelectorAll('[data-anchor-scene-row="1"],[data-live-assistant="1"]').forEach(el=>{
+    if(el.hidden||el.getAttribute('aria-hidden')==='true') return;
+    const text=norm(el.textContent);
+    if(text) liveParts.push(text);
+  });
+  const liveText=norm(liveParts.join(' '));
+  if(liveText.length<12) return false;
+  const kids=Array.from(inner.children);
+  const livePos=kids.indexOf(live);
+  if(livePos<=0) return false;
+  let candidate=null;
+  for(let i=livePos-1;i>=0;i--){
+    const el=kids[i];
+    if(!el||!el.classList) continue;
+    if(el.classList.contains('assistant-turn')){candidate=el;break;}
+    if(el.classList.contains('msg-row')&&!el.classList.contains('assistant-turn')) break;
+  }
+  if(!candidate||candidate===live) return false;
+  const segments=Array.from(candidate.querySelectorAll('.assistant-segment'));
+  if(!segments.length) return false;
+  const covered=segments.every(seg=>{
+    // Compare the Markdown body only: the segment also carries the timestamp and
+    // the turn footer, which the live prose row never contains.
+    const body=seg.querySelector('.msg-body')||seg;
+    const text=norm(body.textContent);
+    return text.length>=12&&liveText.includes(text);
+  });
+  if(!covered) return false;
+  candidate.setAttribute('data-suppressed-by-live-turn','1');
+  candidate.hidden=true;
+  candidate.setAttribute('aria-hidden','true');
+  return true;
+}
+
 function _settledTranscriptOwnsLiveTurn(sid, turn){
   if(!turn) return false;
   const msgs=(typeof S!=='undefined'&&S&&Array.isArray(S.messages))?S.messages:null;
@@ -21987,6 +22046,9 @@ function renderMessages(options){
       }
     }
   }
+  // The live turn is attached by now: drop the transcript's duplicate copy of the
+  // in-progress reply when the live node already shows that text.
+  if(typeof _suppressTranscriptRowsOwnedByLiveTurn==='function') _suppressTranscriptRowsOwnedByLiveTurn(sid);
   // Fail-safe invariant (#3875): a settled assistant turn must never render with
   // ZERO visible content. The Worklog redesign (#3401) folds intermediate
   // assistant segments into a collapsed Worklog card and hides the source segment

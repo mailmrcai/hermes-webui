@@ -3362,6 +3362,9 @@ async function loadSession(sid){
       const liveTurn=document.getElementById('liveAssistantTurn');
       if(!liveTurn||!liveTurn.querySelector('.tool-call-group[data-tool-worklog-group="1"]')) ensureLiveWorklogShell();
     }
+    // The live turn now exists (restored HTML / run-journal scene): drop the
+    // transcript's duplicate copy of this turn's reply if both show it.
+    if(typeof _suppressTranscriptRowsOwnedByLiveTurn==='function') _suppressTranscriptRowsOwnedByLiveTurn(sid);
     _deferWorkspaceRefreshForSession(sid);
     setBusy(true);setComposerStatus('');
     startApprovalPolling(sid);
@@ -3713,7 +3716,10 @@ function _clearSessionSourceTabCounts() {
 }
 
 function _requestedSessionSidebarSource() {
-  return window._showCliSessions ? _sessionSourceFilter : 'webui';
+  // Harness skin: the sidebar is one merged list grouped by workspace, so never
+  // scope the payload to a source bucket. The server treats a missing
+  // sidebar_source as "every source", which is exactly what we want.
+  return '';
 }
 
 function _sessionListExcludeHiddenEnabled() {
@@ -3731,7 +3737,8 @@ function _sessionArchivePagingFilterActive() {
 
 function _sessionListQueryString() {
   const qs = new URLSearchParams();
-  qs.set('sidebar_source', _requestedSessionSidebarSource());
+  const sourceScope=_requestedSessionSidebarSource();
+  if(sourceScope) qs.set('sidebar_source', sourceScope);
   if(_sessionListExcludeHiddenEnabled()) qs.set('exclude_hidden','1');
   if(_showAllProfiles) qs.set('all_profiles','1');
   if(_showArchived){
@@ -4539,6 +4546,41 @@ function _mergePendingSessionMessage(session,messages){
       messages.splice(liveAssistantIdx,0,pendingMsg);
     }
   }else{
+    // No live assistant to anchor to. The transcript may already end with THIS
+    // turn's persisted assistant rows while the turn's own user row is missing
+    // entirely (the server keeps the current prompt in `pending_user_message`
+    // until it settles). Appending there is what pushed the user's own bubble
+    // BELOW the reply it belongs to — `message1 → reply → message2` after a
+    // switch away and back.
+    //
+    // Ownership decides, anchored at the TAIL: walk up over non-user rows while
+    // they are not older than `pending_started_at`; the lowest timestamped row in
+    // that contiguous block is where this turn's output starts. Rows older than
+    // `pending_started_at` are a PREVIOUS turn's (the block ends there), so a
+    // genuinely new turn — including an identical repeat prompt such as "继续"
+    // twice — still appends. Untimestamped rows are tolerated only between a
+    // proven row and the tail; a tail with no proven row stays on the append path.
+    let tailOutputStart=-1;
+    const _startedAt=Number(session&&session.pending_started_at);
+    if(Number.isFinite(_startedAt)&&_startedAt>0){
+      const _epsilon=(typeof _PENDING_ACTIVE_TURN_TS_EPSILON==='number')?_PENDING_ACTIVE_TURN_TS_EPSILON:1e-6;
+      for(let i=messages.length-1;i>=0;i--){
+        const row=messages[i];
+        if(!row||String(row.role||'')==='user') break;
+        const ts=(typeof _messageTimestampSeconds==='function')?_messageTimestampSeconds(row):null;
+        if(ts!==null&&ts<_startedAt-_epsilon) break;
+        if(ts!==null) tailOutputStart=i;
+      }
+    }
+    if(tailOutputStart>=0){
+      // The prompt belongs directly in front of its own turn's output. A row
+      // already sitting there IS the prompt (nothing to add); otherwise insert it
+      // there rather than after the whole transcript.
+      const preceding=messages[tailOutputStart-1];
+      if(preceding&&String(preceding.role||'')==='user'&&_sameTranscriptMessage(preceding,pendingMsg)) return false;
+      messages.splice(tailOutputStart,0,pendingMsg);
+      return true;
+    }
     messages.push(pendingMsg);
   }
   return true;
@@ -8457,9 +8499,79 @@ function _sessionRunningSortRank(session) {
   return session && session.active_stream_id && session.has_pending_user_message ? 1 : 0;
 }
 
+// ── Harness sidebar view options ────────────────────────────────────────────
+// The sidebar "视图选项" menu lives in the skin (harness-theme.js) and is the
+// only writer; these module-scope variables are the only thing the render paths
+// read, so the stored choice is restored before the first paint. The three
+// archived states drive the app's existing `_showArchived` gating, so archived
+// rows keep being fetched through the path the archive toggle already used.
+let _hnsGroupMode = 'workspace';   // 'workspace' | 'date' | 'flat'
+let _hnsSortMode = 'updated';      // 'updated' | 'created' | 'title'
+let _hnsArchivedMode = 'hide';     // 'hide' | 'show' | 'only'
+
+function _hnsNormalise(o) {
+  o = (o && typeof o === 'object') ? o : {};
+  return {
+    groupBy: (o.groupBy === 'date' || o.groupBy === 'flat') ? o.groupBy : 'workspace',
+    orderBy: (o.orderBy === 'created' || o.orderBy === 'title') ? o.orderBy : 'updated',
+    archived: (o.archived === 'show' || o.archived === 'only') ? o.archived : 'hide',
+  };
+}
+function _hnsLoadViewOptions() {
+  let raw = null;
+  try { raw = localStorage.getItem('hermes-harness-view-options'); } catch (_e) { return; }
+  if (!raw) return;
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch (_e) { return; }
+  const o = _hnsNormalise(parsed);
+  _hnsGroupMode = o.groupBy; _hnsSortMode = o.orderBy; _hnsArchivedMode = o.archived;
+  _showArchived = _hnsArchivedMode !== 'hide';
+}
+function _hnsApplyViewOptions(opts) {
+  const o = _hnsNormalise(Object.assign(_hnsGetViewOptions(), opts || {}));
+  _hnsGroupMode = o.groupBy; _hnsSortMode = o.orderBy; _hnsArchivedMode = o.archived;
+  _showArchived = _hnsArchivedMode !== 'hide';
+  try {
+    localStorage.setItem('hermes-harness-view-options', JSON.stringify(o));
+  } catch (_e) { /* in-memory still applies for this session */ }
+  // A view-option change mutates no session data, so the refresh path's
+  // "signature unchanged" short-circuit skips the repaint entirely. Paint from
+  // the cache immediately, then let the fetch run for the archived rows.
+  if (typeof renderSessionListFromCache === 'function') renderSessionListFromCache();
+  renderSessionList({ deferWhileInteracting: false });
+}
+function _hnsGetViewOptions() {
+  return { groupBy: _hnsGroupMode, orderBy: _hnsSortMode, archived: _hnsArchivedMode };
+}
+function _hnsDateBucketLabel(session, now) {
+  const ms = _sessionSortTimestampMs(session);
+  if (!ms) return t('session_time_bucket_older');
+  const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(new Date(now)) - startOfDay(new Date(ms))) / 86400000);
+  if (days <= 0) return t('session_time_bucket_today');
+  if (days === 1) return t('session_time_bucket_yesterday');
+  if (days < 7) return t('session_time_bucket_this_week');
+  if (days < 14) return t('session_time_bucket_last_week');
+  return t('session_time_bucket_older');
+}
+if (typeof window !== 'undefined') {
+  window._hnsApplyViewOptions = _hnsApplyViewOptions;
+  window._hnsGetViewOptions = _hnsGetViewOptions;
+}
+_hnsLoadViewOptions();
+
 function _sessionSidebarSortCompare(a, b) {
   const activeDelta = _sessionRunningSortRank(b) - _sessionRunningSortRank(a);
   if(activeDelta) return activeDelta;
+  if(_hnsSortMode==='title'){
+    // pinned-vs-active still wins above; names sort case-insensitively, locale aware
+    const ta=String(typeof _sessionDisplayTitle==='function'?(_sessionDisplayTitle(a)||''):(a&&a.title||'')).localeCompare(
+      String(typeof _sessionDisplayTitle==='function'?(_sessionDisplayTitle(b)||''):(b&&b.title||'')), undefined, {sensitivity:'base', numeric:true});
+    if(ta) return ta;
+  } else if(_hnsSortMode==='created'){
+    const ca=Number(a&&a.created_at)||0, cb=Number(b&&b.created_at)||0;
+    if(cb!==ca) return cb-ca;
+  }
   return _sessionSortTimestampMs(b) - _sessionSortTimestampMs(a);
 }
 
@@ -8645,6 +8757,32 @@ function _sessionTimeBucketLabel(timestampMs, nowMs) {
   if (timestampMs >= startOfWeek) return t('session_time_bucket_this_week');
   if (timestampMs >= startOfLastWeek) return t('session_time_bucket_last_week');
   return t('session_time_bucket_older');
+}
+
+// The session's working directory — the same value the composer workspace chip
+// shows. Rows carry `workspace` (WebUI sidecar / project binding); state.db-only
+// rows fall back to `cwd`.
+function _sessionWorkspacePath(session) {
+  if (!session || typeof session !== 'object') return '';
+  // `cwd` comes from state.db (the session's real working directory); `workspace`
+  // is the WebUI sidecar value and is often just the profile default.
+  const raw = session.cwd || session.workspace || session.project_workspace || session.created_workspace || '';
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+function _sessionWorkspaceGroupLabel(session) {
+  const ws = _sessionWorkspacePath(session);
+  if (!ws) return t('no_workspace');
+  const parts = ws.split('/').filter(Boolean);
+  // A home directory reads as "~", the way the Harness labels it.
+  if (parts.length === 2 && parts[0] === 'home') return '~';
+  try {
+    if (typeof getWorkspaceFriendlyName === 'function') {
+      const friendly = getWorkspaceFriendlyName(ws);
+      if (friendly) return friendly;
+    }
+  } catch (_e) { /* fall through to the path basename */ }
+  return parts.length ? parts[parts.length - 1] : ws;
 }
 
 function _isChildSession(s){
@@ -9346,6 +9484,28 @@ function _sessionRowsWithActiveEphemeralSession(rows){
   if(!S.session||!S.session.session_id) return rows;
   const sid=S.session.session_id;
   if(rows.some(s=>s&&s.session_id===sid)) return rows;
+  // Compression continuation: the active session is the chain's NEW tip while the
+  // cached rows still carry the previous tip (often the parent itself). Re-point
+  // that row at the new tip instead of synthesizing an ephemeral row — otherwise
+  // the same conversation renders twice, the copy titled from the rotation's own
+  // auto-title and grouped under the default workspace (observed: "评估ape网页功能
+  // 可用性" appearing beside "ApE网页功能可用性评估").
+  const _contParent=String(S.session.parent_session_id||'');
+  if(_contParent){
+    const _pIdx=rows.findIndex(s=>s&&s.session_id===_contParent);
+    if(_pIdx>=0){
+      const _nowSec=Math.floor(Date.now()/1000);
+      const _promoted={
+        ...rows[_pIdx],
+        session_id:sid,
+        last_message_at:S.session.last_message_at||_nowSec,
+        updated_at:S.session.updated_at||_nowSec,
+      };
+      rows=rows.slice();
+      rows[_pIdx]=_promoted;
+      return rows;
+    }
+  }
   const nowSec=Math.floor(Date.now()/1000);
   const activeRow={
     ...S.session,
@@ -9669,7 +9829,10 @@ function _partitionSidebarSessionRows(allMatched, activeSidForSidebar){
       if(isCli) cliArchivedCount++;
       else webuiArchivedCount++;
     }
-    if(!_showArchived&&s.archived) continue;
+    // 'only' inverts the view instead of just widening it; 'hide'/'show' keep the
+    // app's own _showArchived gating (which also drives the archived row fetch).
+    if(_hnsArchivedMode==='only'){ if(!s.archived) continue; }
+    else if(!_showArchived&&s.archived) continue;
     sessionsRaw.push(s);
   }
   if(_sessionSourceFilter==='cli' && !window._showCliSessions && cliSessionCount===0){
@@ -9677,10 +9840,20 @@ function _partitionSidebarSessionRows(allMatched, activeSidForSidebar){
   }
   const showCliOnly=_sessionSourceFilter==='cli';
   const serverArchivedCount=showCliOnly?_archivedCliCount:_archivedWebuiCount;
+  // Harness skin: one merged list. Both source buckets keep their own project
+  // scoping above, then the rows are interleaved by recency so the workspace
+  // grouping below sees a single, time-ordered stream.
+  const _mergeByRecency=(a,b)=>{
+    const out=a.concat(b);
+    if(typeof _sessionSortTimestampMs==='function'){
+      out.sort((x,y)=>_sessionSortTimestampMs(y)-_sessionSortTimestampMs(x));
+    }
+    return out;
+  };
   return {
     cliSessionCount,
-    profileFiltered: showCliOnly ? cliProfileFiltered : webuiProfileFiltered,
-    sessionsRaw: showCliOnly ? cliSessionsRaw : webuiSessionsRaw,
+    profileFiltered: _mergeByRecency(webuiProfileFiltered, cliProfileFiltered),
+    sessionsRaw: _mergeByRecency(webuiSessionsRaw, cliSessionsRaw),
     archivedCount: Math.max(showCliOnly ? cliArchivedCount : webuiArchivedCount, Number(serverArchivedCount||0)),
     webuiReferenceRaw,
     cliReferenceRaw,
@@ -9936,21 +10109,8 @@ function renderSessionListFromCache(){
     const note=_renderSessionListLoadErrorNote();
     if(note) list.appendChild(note);
   }
-  if(window._showCliSessions || cliSessionCount>0){
-    const sourceTabs=document.createElement('div');
-    sourceTabs.className='session-source-tabs';
-    for(const filter of ['webui','cli']){
-      const count=filter==='cli'?cliSessionTabCount:webuiSessionTabCount;
-      const btn=document.createElement('button');
-      btn.type='button';
-      btn.className='session-source-tab'+(_sessionSourceFilter===filter?' active':'');
-      btn.textContent=_sessionSourceLabel(filter,count);
-      btn.setAttribute('aria-pressed', _sessionSourceFilter===filter?'true':'false');
-      btn.onclick=()=>_setSessionSourceFilter(filter);
-      sourceTabs.appendChild(btn);
-    }
-    list.appendChild(sourceTabs);
-  }
+  // Harness skin: the WebUI/CLI source tabs are gone — every session renders in
+  // one list, grouped by workspace below.
   // Project filter bar — show when there are real projects OR there are
   // unassigned sessions (so the Unassigned chip has something to filter to).
   const hasUnprojected=_sidebarHasUnprojectedRows(profileFiltered, projectIdFor);
@@ -10152,19 +10312,41 @@ function renderSessionListFromCache(){
       if(typeof console!=='undefined'&&console.warn) console.warn('hermes: date-group collapse state could not be persisted', e);
     }
   };
-  // Group sessions by date
+  // Group sessions by the view option: workspace (the DeepSeek Harness sidebar,
+  // one section per working directory), date buckets (今天/昨天/本周/上周/更早),
+  // or a single flat list whose headers the skin hides.
   const groups=[];
-  let curLabel=null,curItems=[];
-  if(pinned.length) groups.push({label:'\u2605 Pinned',items:pinned,isPinned:true});
-  for(const s of unpinned){
-    const ts=_sessionSortTimestampMs(s);
-    const label=_sessionTimeBucketLabel(ts, now);
-    if(label!==curLabel){
-      if(curItems.length) groups.push({label:curLabel,items:curItems});
-      curLabel=label;curItems=[s];
-    } else { curItems.push(s); }
+  if(pinned.length) groups.push({label:'Pinned',items:pinned,isPinned:true});
+  if(_hnsGroupMode==='flat'){
+    // flat: one unnamed group; the skin hides every header while the list carries
+    // data-hns-group-mode="flat", so no label text (and no i18n string) is needed
+    groups.push({label:'',items:unpinned,isFlat:true});
+  } else if(_hnsGroupMode==='date'){
+    const buckets=new Map();
+    for(const s of unpinned){
+      const bl=_hnsDateBucketLabel(s,now);
+      if(!buckets.has(bl)) buckets.set(bl,[]);
+      buckets.get(bl).push(s);
+    }
+    // canonical recency order, not first-seen order (a pinned-free week can
+    // otherwise render 上周 above 本周)
+    for(const bl of [t('session_time_bucket_today'),t('session_time_bucket_yesterday'),
+                     t('session_time_bucket_this_week'),t('session_time_bucket_last_week'),
+                     t('session_time_bucket_older')]){
+      if(buckets.has(bl)) groups.push({label:bl,items:buckets.get(bl),isDate:true});
+    }
+  } else {
+    const workspaceGroups=new Map();
+    for(const s of unpinned){
+      const wsLabel=_sessionWorkspaceGroupLabel(s);
+      if(!workspaceGroups.has(wsLabel)) workspaceGroups.set(wsLabel,[]);
+      workspaceGroups.get(wsLabel).push(s);
+    }
+    for(const [label,items] of workspaceGroups){
+      groups.push({label,items,workspace:_sessionWorkspacePath(items[0])});
+    }
   }
-  if(curItems.length) groups.push({label:curLabel,items:curItems});
+  list.dataset.hnsGroupMode=_hnsGroupMode;
   const flatSessionRows=[];
   for(const g of groups){
     if(_groupCollapsed[g.label]) continue;
@@ -10230,6 +10412,7 @@ function renderSessionListFromCache(){
     wrapper.className='session-date-group';
     const hdr=document.createElement('div');
     hdr.className='session-date-header'+(g.isPinned?' pinned':'');
+    if(g.workspace){ hdr.classList.add('hns-ws-group'); hdr.title=g.workspace; }
     const caret=document.createElement('span');
     caret.className='session-date-caret';
     caret.textContent='\u25BE'; // down when expanded; rotated right when collapsed

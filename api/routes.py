@@ -3121,14 +3121,41 @@ def _session_list_payload_to_response(payload: dict) -> dict:
         _redact_enabled = bool(load_settings().get("api_redact_enabled", True))
     except Exception:
         _redact_enabled = True  # fail safe: redact when settings are unreadable
+    # Sessions are grouped by working directory in the sidebar, and the row's
+    # `workspace` is the WebUI sidecar value (often the profile default), so
+    # stamp the authoritative state.db `cwd` in one batched read.
+    _cwd_by_session_id: dict = {}
+    try:
+        _cwd_ids = [
+            (s or {}).get("session_id")
+            for s in (list(runtime_rows) + list(payload.get("sidebar_reference_sessions", []) or []))
+            if isinstance(s, dict)
+        ]
+        _cwd_by_session_id = _state_db_cwd_map(_cwd_ids)
+    except Exception:
+        _cwd_by_session_id = {}
     for s in runtime_rows:
         item = _sidebar_session_response_item(s, redact_enabled=_redact_enabled) if isinstance(s, dict) else {}
+        if item:
+            _sid = str(item.get("session_id") or "")
+            if _sid and _cwd_by_session_id.get(_sid):
+                item["cwd"] = _cwd_by_session_id[_sid]
         safe_merged.append(item)
+    # A compression continuation can arrive in the other half of this merged list
+    # (see _collapse_continuation_rows), which would render the same conversation
+    # twice. Fold it back into its chain head before serialising.
+    try:
+        safe_merged = _collapse_continuation_rows(safe_merged)
+    except Exception:
+        pass
     safe_reference = []
     for s in payload.get("sidebar_reference_sessions", []) or []:
         item = _sidebar_session_response_item(s, redact_enabled=_redact_enabled) if isinstance(s, dict) else {}
         if item:
             item["_sidebar_reference_only"] = True
+            _sid = str(item.get("session_id") or "")
+            if _sid and _cwd_by_session_id.get(_sid):
+                item["cwd"] = _cwd_by_session_id[_sid]
         safe_reference.append(item)
     response = {
         "sessions": safe_merged,
@@ -9650,6 +9677,344 @@ def _state_db_session_source(sid: str) -> str:
     return str(row[0] or "").strip().lower()
 
 
+def _continuation_chain_session_ids(session_id: str) -> list:
+    """Every state.db session id belonging to the same logical conversation.
+
+    A compression rotation leaves a parent/child chain behind, and the sidebar
+    renders it as ONE row while the pin flag can sit on any node (the row that was
+    pinned when it was still rendered on its own). Pin mutations therefore have to
+    be applied to the whole chain or the row's pin state can never be cleared.
+    """
+    sid = str(session_id or "")
+    if not sid or not is_safe_session_id(sid):
+        return []
+    try:
+        from api.models import _active_state_db_path
+        db_path = _active_state_db_path()
+        if not db_path or not Path(db_path).exists():
+            return [sid]
+        import sqlite3 as _sqlite
+        with closing(_sqlite.connect(str(db_path))) as conn:
+            conn.row_factory = _sqlite.Row
+            row = conn.execute("SELECT session_key FROM sessions WHERE id = ?", (sid,)).fetchone()
+            key = str((dict(row).get("session_key") if row else "") or "")
+            if key:
+                rows = conn.execute("SELECT id FROM sessions WHERE session_key = ?", (key,)).fetchall()
+                chain = [str(dict(r).get("id")) for r in rows if dict(r).get("id")]
+                if chain:
+                    return chain
+            # No session_key: walk the parent/child links instead.
+            chain = [sid]
+            seen = {sid}
+            frontier = [sid]
+            while frontier and len(chain) < 64:
+                cur = frontier.pop()
+                for r in conn.execute(
+                    "SELECT id FROM sessions WHERE parent_session_id = ?", (cur,)
+                ).fetchall():
+                    cid = str(dict(r).get("id") or "")
+                    if cid and cid not in seen:
+                        seen.add(cid); chain.append(cid); frontier.append(cid)
+                r = conn.execute(
+                    "SELECT parent_session_id FROM sessions WHERE id = ?", (cur,)
+                ).fetchone()
+                pid = str((dict(r).get("parent_session_id") if r else "") or "")
+                if pid and pid not in seen:
+                    seen.add(pid); chain.append(pid); frontier.append(pid)
+            return chain
+    except Exception:
+        return [sid]
+
+
+
+def _dedupe_replayed_message_rows(messages):
+    """Drop replay-duplicated rows from a session's display messages.
+
+    The compaction replay path can re-append a conversation's opening exchange
+    (identical role + timestamp + content) deep inside the messages array. The
+    array order is what the transcript renders, so the stale copy shows up AFTER
+    newer messages — the user reads it as "my new message appeared above Hermes's
+    previous reply" after a mid-turn refresh. Keeping the FIRST occurrence of an
+    exact (role, timestamp, content, tool_name) match removes the replay copy
+    without touching anything else; genuine repeats (same text, different second)
+    keep both rows.
+    """
+    if not isinstance(messages, list) or len(messages) < 2:
+        return messages
+    seen = set()
+    out = []
+    for m in messages:
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        try:
+            # content may be a multi-part list — stringify for hashing.
+            key = (
+                m.get("role"),
+                m.get("timestamp"),
+                json.dumps(m.get("content"), ensure_ascii=False, sort_keys=True, default=str)
+                if isinstance(m.get("content"), (list, dict)) else m.get("content"),
+                m.get("tool_name"),
+            )
+        except Exception:
+            out.append(m)
+            continue
+        if key in seen and key[0] in ("user", "assistant", "tool"):
+            continue
+        if key[1] is not None and key[2] is not None:
+            seen.add(key)
+        out.append(m)
+    return _restore_replayed_row_order(out)
+
+
+def _restore_replayed_row_order(messages):
+    """Chronologically re-seat rows a replay appended out of order.
+
+    The replay path can re-append a row whose original was later rewritten by
+    compaction (so the exact-duplicate pass cannot see it). Such a row carries a
+    timestamp far OLDER than everything before it; when a dip larger than 5s
+    exists, stable-sort by timestamp (untimestamped rows inherit the previous
+    key so they never jump). Sessions with a monotonic timeline are returned
+    untouched — a same-second race of a few milliseconds is not a dip.
+    """
+    if not isinstance(messages, list) or len(messages) < 2:
+        return messages
+    keys = []
+    running = None
+    dips = 0
+    for m in messages:
+        t = m.get("timestamp") if isinstance(m, dict) else None
+        if isinstance(t, (int, float)):
+            if running is not None and t < running - 5:
+                dips += 1
+            running = t if running is None else max(running, t)
+            keys.append(t)
+        else:
+            keys.append(running if running is not None else float("inf"))
+    if not dips:
+        return messages
+    order = sorted(range(len(messages)), key=lambda i: (keys[i], i))
+    return [messages[i] for i in order]
+
+
+def _state_db_lineage_rows(session_ids) -> dict:
+    """Return ``{id: row}`` with the columns ``_is_continuation_session`` needs.
+
+    One batched read against state.db. Any failure returns ``{}`` so the sidebar
+    keeps its current behaviour instead of erroring.
+    """
+    ids = [str(s) for s in session_ids if s and is_safe_session_id(str(s))]
+    if not ids:
+        return {}
+    try:
+        from api.models import _active_state_db_path
+        db_path = _active_state_db_path()
+        if not db_path or not Path(db_path).exists():
+            return {}
+        import sqlite3 as _sqlite
+        with closing(_sqlite.connect(str(db_path))) as _conn:
+            _conn.row_factory = _sqlite.Row
+            placeholders = ",".join("?" * len(ids))
+            rows = _conn.execute(
+                "SELECT id, parent_session_id, session_key, end_reason, ended_at,"
+                " started_at, source, model_config, created_source"
+                f" FROM sessions WHERE id IN ({placeholders})",
+                ids,
+            ).fetchall()
+    except Exception:
+        return {}
+    out: dict = {}
+    for row in rows:
+        d = dict(row)
+        sid = str(d.get("id") or "")
+        if not sid:
+            continue
+        out[sid] = {
+            "id": sid,
+            "parent_session_id": d.get("parent_session_id"),
+            "session_key": d.get("session_key"),
+            "end_reason": d.get("end_reason"),
+            "ended_at": d.get("ended_at"),
+            "started_at": d.get("started_at"),
+            "source": d.get("source"),
+            "created_source": d.get("created_source"),
+            # _is_continuation_session() reads this to spot WebUI 'fork' rows.
+            "session_source": d.get("created_source"),
+            "model_config": d.get("model_config"),
+        }
+    return out
+
+
+def _collapse_continuation_rows(items: list) -> list:
+    """Fold a compression-continuation CHAIN into the row that heads it.
+
+    Upstream ``_project_agent_session_rows`` does this inside a single query, but
+    the sidebar response concatenates the WebUI index list with the state.db list,
+    so a parent and its continuation can land in different halves and every node
+    of a long chain can survive as its own row — the user then sees the same
+    conversation several times, latest copy titled from whatever the title model
+    last emitted, and clicking a sealed node mints yet another continuation.
+
+    The chain is walked to its DEEPEST node: the head keeps its visible identity
+    (title, timestamp) while navigation is re-pointed at the live tip, which is the
+    only node that does not resume/mint a new session when opened. Rows whose
+    parent is absent from this response are left untouched.
+    """
+    if not items:
+        return items
+    try:
+        from api.agent_sessions import _is_continuation_session
+    except Exception:
+        return items
+    ids = [str(i.get("session_id") or "") for i in items if isinstance(i, dict)]
+    db_rows = _state_db_lineage_rows(ids)
+    if not db_rows:
+        return items
+    by_id = {str(i.get("session_id") or ""): i for i in items if isinstance(i, dict)}
+
+    # child -> parent, only for edges that upstream would treat as continuations
+    child_of: dict = {}
+    for sid, child in db_rows.items():
+        if sid not in by_id:
+            continue
+        parent_id = str(child.get("parent_session_id") or "")
+        if not parent_id or parent_id == sid or parent_id not in by_id:
+            continue
+        if _is_continuation_session(db_rows.get(parent_id), child):
+            child_of[sid] = parent_id
+    if not child_of:
+        return items
+
+    def _started(sid: str) -> float:
+        try:
+            return float((db_rows.get(sid) or {}).get("started_at") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _archived(sid: str) -> bool:
+        return bool((by_id.get(sid) or {}).get("archived"))
+
+    def _deepest_tip(root_id: str) -> str:
+        # Prefer the deepest node that is still VISIBLE: an archived tip means
+        # the user already archived this conversation (the write may have landed
+        # on the tip before chain-sync existed), so walking onto it would point
+        # the row at a hidden session.
+        cur = root_id
+        seen = {cur}
+        while True:
+            nxt = [c for c, p in child_of.items() if p == cur and c not in seen and not _archived(c)]
+            if not nxt:
+                return cur
+            nxt.sort(key=_started, reverse=True)
+            cur = nxt[0]
+            seen.add(cur)
+
+    def _chain_ids(root_id: str) -> list:
+        out = [root_id]
+        cur = root_id
+        seen = {cur}
+        while True:
+            nxt = [c for c, p in child_of.items() if p == cur and c not in seen]
+            if not nxt:
+                return out
+            nxt.sort(key=_started, reverse=True)
+            cur = nxt[0]
+            seen.add(cur)
+            out.append(cur)
+
+    kept = [i for i in items if str(i.get("session_id") or "") not in child_of]
+    kept_by_id = {str(i.get("session_id") or ""): i for i in kept}
+    for head_id, head in list(kept_by_id.items()):
+        chain_ids = _chain_ids(head_id)
+        # The pin flag can sit on ANY node of the chain (it was set when that node
+        # was still its own row); surface it on the single visible row.
+        pinned_owner = next((cid for cid in chain_ids if (by_id.get(cid) or {}).get("pinned")), None)
+        if pinned_owner:
+            head["pinned"] = True
+            head["_pin_owner_id"] = pinned_owner
+        # Same merge for archived: if every node of the chain is archived the
+        # single visible row must say so, or the conversation can never leave
+        # the default list (the stuck-archive symptom).
+        if chain_ids and all(_archived(cid) for cid in chain_ids):
+            head["archived"] = True
+        tip_id = _deepest_tip(head_id)
+        if tip_id == head_id:
+            continue
+        head["session_id"] = tip_id
+        head["_continuation_tip_of"] = head_id
+        try:
+            tip_started = _started(tip_id)
+            if tip_started > float(head.get("updated_at") or 0):
+                head["updated_at"] = tip_started
+        except (TypeError, ValueError):
+            pass
+
+    # Subagent / child rows point at a chain node this fold no longer renders;
+    # retarget their parent reference at the folded row's VISIBLE id so the
+    # sidebar can nest them under the conversation again instead of letting
+    # them float as unrelated top-level rows.
+    visible_ids = {str(i.get("session_id") or "") for i in kept}
+    member_owner: dict = {}
+    for head_id, head in kept_by_id.items():
+        for cid in _chain_ids(head_id):
+            member_owner[cid] = head
+    for i in kept:
+        pid = str(i.get("parent_session_id") or "")
+        if not pid or pid in visible_ids:
+            continue
+        owner = member_owner.get(pid)
+        if not owner:
+            continue
+        new_pid = str(owner.get("session_id") or "")
+        if not new_pid or new_pid == pid:
+            continue
+        i["parent_session_id"] = new_pid
+        # The sidebar nests a row only when relationship_type says 'child_session'
+        # (see _isChildSession in sessions.js). The agent-side projection sets it
+        # only when the PARENT was in the same half of the merged list, so set it
+        # here for retargeted children or they render as unrelated top-level rows.
+        if not i.get("relationship_type"):
+            i["relationship_type"] = "child_session"
+        if i.get("_parent_lineage_root_id"):
+            i["_parent_lineage_root_id"] = str(owner.get("_continuation_tip_of") or new_pid)
+        if i.get("_parent_lineage_tip_id"):
+            i["_parent_lineage_tip_id"] = new_pid
+    return kept
+
+
+def _state_db_cwd_map(session_ids) -> dict:
+    """Return ``{session_id: cwd}`` for the given ids from state.db.
+
+    The sidebar row's ``workspace`` is the WebUI's own notion (sidecar
+    ``workspace`` — often the profile default), while the session's real working
+    directory lives in ``state.db`` as ``cwd``. The sidebar groups conversations
+    by workspace, so it needs the authoritative value. One batched read; any
+    failure returns {} and callers fall back to ``workspace``.
+    """
+    ids = [str(s) for s in session_ids if s and is_safe_session_id(str(s))]
+    if not ids:
+        return {}
+    out: dict = {}
+    try:
+        from api.models import _active_state_db_path
+        db_path = _active_state_db_path()
+        if not db_path or not Path(db_path).exists():
+            return {}
+        import sqlite3 as _sqlite
+        with closing(_sqlite.connect(str(db_path))) as _conn:
+            placeholders = ",".join("?" * len(ids))
+            rows = _conn.execute(
+                f"SELECT id, cwd FROM sessions WHERE id IN ({placeholders})", ids
+            ).fetchall()
+    except Exception:
+        return {}
+    for sid, cwd in rows:
+        value = str(cwd or "").strip()
+        if value:
+            out[str(sid)] = value
+    return out
+
+
 def _is_subagent_child_session_id(sid: str) -> bool:
     """Return True when ``sid`` is a delegated subagent child in state.db.
 
@@ -12492,6 +12857,7 @@ from api.workspace import (
     serialize_workspace_entries_for_browser,
     dir_signature,
     list_workspace_suggestions,
+    browse_workspace_dirs,
     read_file_content,
     read_authorized_escape_file_content,
     safe_resolve_ws,
@@ -12671,6 +13037,21 @@ _SIDEBAR_SESSION_RESPONSE_FIELDS = (
 
 
 
+# A derived title is cut from the FIRST user message, and every user message is
+# stored model-side with a `[Workspace::v1: <path>]` sentinel in front, so a
+# title derived from a session whose first turn carried no user text came out as
+# the sentinel itself ("[Workspace::v1: /research/…"). Strip it before display.
+_WORKSPACE_SENTINEL_RE = re.compile(r"^\s*\[Workspace::v1:\s*(?:\\.|[^\]\\])+\]\s*")
+
+
+def _workspace_prefix_stripped(text: str) -> str:
+    """Drop a leading ``[Workspace::v1: …]`` sentinel from a display title."""
+    if not isinstance(text, str) or "[Workspace::v1:" not in text:
+        return text
+    stripped = _WORKSPACE_SENTINEL_RE.sub("", text).strip()
+    return stripped or text
+
+
 def _sidebar_session_response_item(session: dict, *, redact_enabled: bool | None = None) -> dict:
     """Return the bounded /api/sessions row shape used by the sidebar.
 
@@ -12686,6 +13067,7 @@ def _sidebar_session_response_item(session: dict, *, redact_enabled: bool | None
         if key in _SIDEBAR_SESSION_RESPONSE_FIELDS
     }
     if isinstance(item.get("title"), str):
+        item["title"] = _workspace_prefix_stripped(item["title"])
         item["title"] = _redact_text(item["title"], _enabled=redact_enabled)
     _redact_sidebar_title_fields(item, redact_enabled)
     item["attention"] = _session_attention_summary(str(item.get("session_id") or ""))
@@ -15515,6 +15897,10 @@ def _handle_session_get(handler, parsed) -> bool:
                 _display_tool_calls, _display_owner_positions
             )
         if load_messages:
+            # Replay-duplicated rows would render out of chronological order
+            # (see _dedupe_replayed_message_rows); strip them before windowing so
+            # counts and the window agree.
+            _all_msgs = _dedupe_replayed_message_rows(_all_msgs)
             _truncated_msgs, _messages_offset = _message_window_for_display(
                 _all_msgs,
                 msg_limit=msg_limit,
@@ -16713,8 +17099,26 @@ def handle_get(handler, parsed) -> bool:
             },
         )
 
+    if parsed.path == "/api/workspaces/browse":
+        # Drill-down listing for the sidebar workspace picker: children of a path
+        # that is a trusted root, under one, or an ancestor of one (policy lives
+        # in api/workspace.py::browse_workspace_dirs).
+        from api.profiles import get_active_profile_name
+
+        qs = parse_qs(parsed.query)
+        target = qs.get("path", [""])[0]
+        active_profile = get_active_profile_name()
+        try:
+            payload = browse_workspace_dirs(target, profile=active_profile)
+        except TypeError:
+            payload = browse_workspace_dirs(target)
+        return j(handler, payload)
+
     if parsed.path == "/api/sessions/search":
         return _handle_sessions_search(handler, parsed)
+
+    if parsed.path == "/api/fs/list":
+        return _handle_fs_list_dir(handler, parsed)
 
     if parsed.path == "/api/list":
         return _handle_list_dir(handler, parsed)
@@ -18809,6 +19213,41 @@ def handle_post(handler, parsed) -> bool:
         # erase the child's state.db transcript — refuse it.
         if _session_is_subagent_view_only(sid):
             return bad(handler, "Subagent sessions are view-only and cannot be deleted from WebUI", 400)
+        # A folded continuation row deletes by the TIP's id; the chain's other
+        # nodes (including the visible HEAD) would survive and re-render as the
+        # same conversation. Remove the siblings first: state.db rows via the
+        # shared deleter, sidecar files directly — the session index prunes
+        # entries whose sidecar file is gone on the next read.
+        try:
+            from api.models import delete_cli_session as _chain_db_delete
+            for _chain_sid in _continuation_chain_session_ids(str(sid)):
+                if _chain_sid == str(sid) or not is_safe_session_id(_chain_sid):
+                    continue
+                try:
+                    if _session_is_subagent_view_only(_chain_sid):
+                        continue
+                    if _lookup_cli_session_metadata(_chain_sid).get("read_only"):
+                        continue
+                except Exception:
+                    pass
+                try:
+                    _chain_db_delete(_chain_sid)
+                except Exception:
+                    pass
+                try:
+                    _sp = (SESSION_DIR / f"{_chain_sid}.json").resolve()
+                    _sp.relative_to(SESSION_DIR.resolve())
+                    if _sp.exists():
+                        _sp.unlink()
+                except Exception:
+                    pass
+                try:
+                    from api.config import _evict_session_agent
+                    _evict_session_agent(_chain_sid)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         is_messaging_session = _is_messaging_session_id(sid)
         worktree_retained = _worktree_retained_payload_for_session_id(sid)
         try:
@@ -20013,6 +20452,26 @@ def handle_post(handler, parsed) -> bool:
             with _get_session_agent_lock(body["session_id"]):
                 s.pinned = pin_requested
                 s.save()
+        # A compression-continuation chain renders as ONE sidebar row, but the pin
+        # flag may live on a different node than the row's navigation id — that is
+        # why "unpin" used to do nothing on a folded row. Normalise the whole chain
+        # (exactly one pinned node when pinning, none when unpinning).
+        try:
+            for _chain_sid in _continuation_chain_session_ids(str(body["session_id"])):
+                if _chain_sid == str(body["session_id"]):
+                    continue
+                try:
+                    _cs = get_session(_chain_sid)
+                    _cs = _ensure_full_session_before_mutation(_chain_sid, _cs)
+                except Exception:
+                    continue
+                if not getattr(_cs, "pinned", False):
+                    continue
+                with _get_session_agent_lock(_chain_sid):
+                    _cs.pinned = False
+                    _cs.save()
+        except Exception:
+            pass
         publish_session_list_changed(
             "session_pin",
             profile=getattr(s, "profile", None),
@@ -20263,6 +20722,34 @@ def handle_post(handler, parsed) -> bool:
                 SESSIONS[sid] = s
                 SESSIONS.move_to_end(sid)
                 _evict_sessions_over_cap()  # #4765: safe LRU eviction (never active/unsaved)
+        # A folded continuation row sends the chain TIP's id while the row's
+        # visibility follows the HEAD's archived flag — archiving only the tip
+        # left the conversation stuck in the list (observed on two sessions).
+        # Apply the request to every member of the chain.
+        _arch_requested = bool(body.get("archived", True))
+        try:
+            for _chain_sid in _continuation_chain_session_ids(str(sid)):
+                if _chain_sid == str(sid):
+                    continue
+                try:
+                    if _session_is_subagent_view_only(_chain_sid):
+                        continue
+                    _cs = get_session(_chain_sid)
+                    _cs = _ensure_full_session_before_mutation(_chain_sid, _cs)
+                except Exception:
+                    continue
+                if bool(getattr(_cs, "archived", False)) == _arch_requested:
+                    continue
+                try:
+                    with _get_session_agent_lock(_chain_sid):
+                        _cs.archived = _arch_requested
+                        _cs.save(touch_updated_at=False)
+                        with LOCK:
+                            SESSIONS[_chain_sid] = _cs
+                except Exception:
+                    continue
+        except Exception:
+            pass
         publish_session_list_changed(
             "session_archive",
             profile=getattr(s, "profile", None),
@@ -21680,6 +22167,61 @@ def _handle_escape_authorize(handler, parsed, body: dict | None = None):
     except ValueError as exc:
         return bad(handler, _sanitize_error(exc), 404)
     return j(handler, payload)
+
+
+def _handle_fs_list_dir(handler, parsed):
+    """Read-only directory listing for the sidebar workspace picker.
+
+    The picker has to browse arbitrary absolute paths (e.g. /research), which
+    ``/api/list`` cannot do: that one is session-scoped and rejects anything
+    outside the session's workspace, and ``/api/escape/list`` needs an escape
+    token. Nothing here writes, creates or executes — it only reads directory
+    entries, and it stays behind the normal WebUI auth like every other route.
+    """
+    qs = parse_qs(parsed.query)
+    raw = (qs.get("path", ["~"])[0] or "~").strip() or "~"
+    try:
+        target = Path(os.path.expanduser(raw)).resolve()
+    except (OSError, RuntimeError) as exc:
+        return bad(handler, _sanitize_error(exc) or "invalid path", 400)
+    if not target.exists():
+        return bad(handler, "path not found", 404)
+    if not target.is_dir():
+        return bad(handler, "not a directory", 400)
+    entries = []
+    try:
+        with os.scandir(target) as it:
+            for entry in it:
+                try:
+                    is_dir = entry.is_dir()
+                except OSError:
+                    is_dir = False
+                entries.append(
+                    {
+                        "name": entry.name,
+                        "path": str(Path(entry.path)),
+                        "is_dir": is_dir,
+                        "hidden": entry.name.startswith("."),
+                    }
+                )
+    except PermissionError:
+        return bad(handler, "permission denied", 403)
+    except OSError as exc:
+        return bad(handler, _sanitize_error(exc) or "cannot list directory", 400)
+    # directories first, then case-insensitive name; dotfiles still included so the
+    # picker can show everything the user asked for
+    entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+    parent = str(target.parent) if target.parent != target else ""
+    limit = 500
+    return j(
+        handler,
+        {
+            "path": str(target),
+            "parent": parent,
+            "entries": entries[:limit],
+            "truncated": len(entries) > limit,
+        },
+    )
 
 
 def _handle_escape_list_dir(handler, parsed):
@@ -27588,15 +28130,19 @@ def _start_chat_stream_for_session(
                 goal_related = True
                 consumed_goal_continuation = True
                 consumed_goal_continuation_receipt = receipt
+                # A goal round is starting: count it now (the judge no longer does).
+                from api.goals import note_goal_turn_started
+                note_goal_turn_started(s.session_id, profile_name=getattr(s, "profile", None))
         if s.session_id in PENDING_BG_TASK_COMPLETIONS:
             PENDING_BG_TASK_COMPLETIONS.discard(s.session_id)
             consumed_bg_task_completion = True
 
     def restore_consumed_continuation_markers() -> None:
         if consumed_goal_continuation:
-            from api.goals import restore_pending_goal_continuation
+            from api.goals import restore_pending_goal_continuation, undo_goal_turn_started
 
             restore_pending_goal_continuation(s.session_id, consumed_goal_continuation_receipt)
+            undo_goal_turn_started(s.session_id, profile_name=getattr(s, "profile", None))
         if consumed_bg_task_completion:
             PENDING_BG_TASK_COMPLETIONS.add(s.session_id)
 
@@ -28606,6 +29152,141 @@ def _handle_session_compression_recovery_start(handler, body):
     )
 
 
+def _handle_goal_continue(handler, body, session, profile_home, stream_running):
+    """Revive a stalled goal loop (``/goal continue``).
+
+    The WebUI goal loop is a single chain: settle -> SSE ``goal_continue`` ->
+    the browser queues the next round. When a link breaks (page reload, an
+    interrupted goal turn, a WebUI restart clearing the in-memory continuation
+    registry) the goal stays ``active`` with ``last_verdict=continue`` and
+    nothing running — and nothing ever restarts it, because ``/goal resume``
+    deliberately does not kick off. This action re-issues the standard
+    continuation prompt with ``goal_related=True`` (exactly what the automatic
+    chain would have sent), so the settle path resumes evaluating turns and
+    the loop self-repairs from that round on.
+    """
+    from api.goals import goal_state_snapshot, CONTINUATION_PROMPT_TEMPLATE
+
+    if stream_running:
+        return j(handler, {"ok": False, "status": "agent_running",
+                           "error": "agent_running"}, status=409)
+    state = goal_state_snapshot(session.session_id, profile_home=profile_home)
+    if not state:
+        return j(handler, {"ok": False, "status": "no_goal",
+                           "error": "No goal is set for this session. Use /goal <text> to set one."},
+                 status=409)
+
+    def _g(name, default=None):
+        if isinstance(state, dict):
+            return state.get(name, default)
+        return getattr(state, name, default)
+
+    goal_status = str(_g("status", "") or "")
+    verdict = _g("last_verdict")
+    turns_used = int(_g("turns_used", 0) or 0)
+    max_turns = int(_g("max_turns", 0) or 0)
+    goal_text = str(_g("goal", "") or "").strip()
+    if goal_status not in ("active", "paused") or not goal_text:
+        return j(handler, {"ok": False, "status": goal_status or "no_goal",
+                           "error": ("Goal is %s; only an active or paused goal can be continued. "
+                                     "Use /goal <text> to set a new one.") % (goal_status or "not set")},
+                 status=409)
+    if verdict != "continue":
+        return j(handler, {"ok": False, "status": goal_status,
+                           "error": "Last verdict was %r, not 'continue' - the loop is not "
+                                    "stalled mid-work. Use /goal <text> to restart it." % (verdict,)},
+                 status=409)
+    if max_turns and turns_used >= max_turns:
+        return j(handler, {"ok": False, "status": goal_status,
+                           "error": "Turn budget exhausted (%d/%d). Raise the budget or set a new goal."
+                                    % (turns_used, max_turns)},
+                 status=409)
+
+    ok, payload = _goal_continue_kick(session, profile_home, goal_text, body=body)
+    if ok:
+        payload.setdefault("goal", goal_text)
+        payload.setdefault("turns_used", turns_used)
+        payload.setdefault("max_turns", max_turns)
+        return j(handler, payload, status=200)
+    status = 409 if payload.get("error") == "agent_running" else 400
+    return j(handler, payload, status=status)
+
+
+def _goal_continue_kick(session, profile_home, goal_text, body=None):
+    """Start the next goal round for a stalled loop.
+
+    Shared by the manual ``/goal continue`` action and the goal watchdog
+    (api/goal_watchdog.py). Sends the standard continuation prompt with
+    ``goal_related=True`` — byte-identical to what the automatic chain sends —
+    so the settle path resumes evaluating turns afterwards. Returns
+    ``(ok, payload)``; never raises for ordinary failures.
+    """
+    from api.goals import CONTINUATION_PROMPT_TEMPLATE
+
+    body = body or {}
+    prompt = CONTINUATION_PROMPT_TEMPLATE.format(goal=str(goal_text or "").strip())
+    try:
+        workspace = str(resolve_trusted_workspace(
+            body.get("workspace") or session.workspace,
+            profile=getattr(session, "profile", None),
+        ))
+    except ValueError as e:
+        return False, {"ok": False, "error": str(e)}
+    requested_model = body.get("model") or session.model
+    requested_provider = (
+        body.get("model_provider") if "model_provider" in body
+        else getattr(session, "model_provider", None)
+    )
+    _pp_provider, _pp_default, _pp_cfg = _read_profile_model_config(session, requested_provider)
+    model, model_provider, normalized_model = _resolve_compatible_session_model_state(
+        requested_model,
+        requested_provider,
+        profile_provider=_pp_provider,
+        profile_default_model=_pp_default,
+        profile_config=_pp_cfg,
+        profile=getattr(session, "profile", None),
+        explicit_model_pick=bool(body.get("explicit_model_pick")),
+    )
+    alias_refusal = _external_model_alias_lane_response(
+        api_config.resolve_model_alias_runtime(model_provider, expected_model=model),
+        external_owned=webui_gateway_chat_enabled(get_config()),
+    )
+    if alias_refusal is not None:
+        alias_refusal.pop("_status", None)
+        return False, {"ok": False, **alias_refusal}
+    try:
+        stream_response = _start_run(
+            session,
+            msg=prompt,
+            attachments=[],
+            workspace=workspace,
+            model=model,
+            model_provider=model_provider,
+            normalized_model=normalized_model,
+            source="webui",
+            route="/api/goal",
+            gateway_chat_enabled=webui_gateway_chat_enabled(get_config()),
+            goal_related=True,
+        )
+    except Exception:
+        logger.exception("goal continue kickoff failed for %s", session.session_id)
+        return False, {"ok": False, "error": "kickoff_failed"}
+    http_status = int(stream_response.pop("_status", 200) or 200)
+    payload = {
+        "ok": http_status < 400,
+        "status": "continuing" if http_status < 400 else "error",
+    }
+    payload.update(stream_response)
+    if http_status < 400:
+        # This continuation round counts against the goal's turn budget.
+        try:
+            from api.goals import note_goal_turn_started
+            note_goal_turn_started(session.session_id, profile_name=getattr(session, "profile", None))
+        except Exception:
+            logger.debug("goal turn counter increment failed", exc_info=True)
+    return http_status < 400, payload
+
+
 def _handle_goal_command(handler, body):
     """Handle WebUI /goal command controls and optional kickoff stream."""
     try:
@@ -28682,6 +29363,8 @@ def _handle_goal_command(handler, body):
             ),
         }, status=501)
     goal_action = goal_args.strip().lower()
+    if goal_action == "continue" and not runner_goal_owned:
+        return _handle_goal_continue(handler, body, s, profile_home, stream_running)
     will_kickoff = bool(
         goal_args.strip()
         and goal_action not in ("status", "pause", "resume", "clear", "stop", "done")
@@ -28894,6 +29577,14 @@ def _handle_goal_command(handler, body):
             _rollback_goal_after_failed_kickoff()
             payload["ok"] = False
             return j(handler, payload, status=status)
+        # Round 1 of this goal has started: count it now (the judge only reads the
+        # counter, so a round that never gets judged still counts against the
+        # budget — see api/goals.py:note_goal_turn_started).
+        try:
+            from api.goals import note_goal_turn_started
+            note_goal_turn_started(s.session_id, profile_name=getattr(s, "profile", None))
+        except Exception:
+            logger.debug("goal turn counter increment failed", exc_info=True)
 
     return j(handler, payload)
 
@@ -31082,7 +31773,20 @@ def _handle_workspace_add(handler, body):
     try:
         p = validate_workspace_to_add(path_str, profile=active_profile)
     except ValueError as e:
-        return bad(handler, str(e))
+        # A directory inside a tree this profile's sessions already run in is a
+        # legitimate workspace even though it is neither under home nor saved yet
+        # — that is exactly the tree the sidebar picker browses. Blocked system
+        # roots stay refused.
+        from api.workspace import _is_blocked_workspace_path, session_data_roots
+        covered = False
+        if not _is_blocked_workspace_path(candidate, path_str):
+            for root in session_data_roots(profile=active_profile):
+                if candidate == root or _is_within(candidate, root):
+                    covered = True
+                    break
+        if not covered:
+            return bad(handler, str(e))
+        p = candidate
     # One shared lock with the bindings save path: /api/projects/bind's
     # _resolve_ws_list reads AND rewrites this same saved workspace list under
     # _PROJECTS_CATALOG_LOCK, so a workspace add that read it outside the lock

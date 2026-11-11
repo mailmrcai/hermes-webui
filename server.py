@@ -679,6 +679,13 @@ def main() -> None:
     _abort_if_already_serving(HOST, PORT)
     httpd = QuietHTTPServer((HOST, PORT), Handler)
     from api.gateway_chat import resume_gateway_runs_after_restart; resume_gateway_runs_after_restart()  # bound, not yet serving
+    # Goal-loop watchdog: revive goals stuck `active`+`continue` with nothing
+    # running (restart-broken / settle-skipped chains). Best-effort only.
+    try:
+        from api.goal_watchdog import start_goal_watchdog
+        start_goal_watchdog()
+    except Exception as _goal_wd_err:
+        print(f'[!!] WARNING: goal watchdog failed to start: {_goal_wd_err}', flush=True)
 
     from api.config import TLS_ENABLED, TLS_CERT, TLS_KEY
     scheme = 'https' if TLS_ENABLED else 'http'

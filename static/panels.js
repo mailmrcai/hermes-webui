@@ -7427,6 +7427,29 @@ function _openProfileSwitchSessionBrowser(){
   }catch(_){}
 }
 
+/**
+ * Newest conversation in the ACTIVE profile (the profile cookie has already been
+ * switched when this runs). Profile switching is a context change, not a "start a
+ * new conversation" command, so both switch branches activate this session instead
+ * of minting an empty chat. Returns null when the profile has no conversation.
+ */
+async function _mostRecentProfileSessionId() {
+  try {
+    const payload = await api('/api/sessions' + (typeof _sessionListQueryString === 'function' ? _sessionListQueryString() : ''));
+    const rows = (payload && payload.sessions) || [];
+    let best = null;
+    let bestTs = -Infinity;
+    for (const row of rows) {
+      if (!row || !row.session_id) continue;
+      const ts = Number(row.updated_at || row.last_activity || row.started_at || 0);
+      if (ts > bestTs) { bestTs = ts; best = row; }
+    }
+    return best ? String(best.session_id) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function switchToProfile(name) {
   // ── #4671 profile-switch loading-skeleton — FOUR-GUARD CONTRACT ───────────────
   // The skeleton must never be clobbered by the OLD profile's content and must never
@@ -7695,9 +7718,28 @@ async function switchToProfile(name) {
       if (workspaceVisible && typeof clearWorkspaceTreeSkeleton === 'function') clearWorkspaceTreeSkeleton();
       showToast(t('profile_switched', name));
     } else if (sessionInProgress) {
-      // The current session has messages and belongs to the previous profile.
-      // Start a new session for the new profile so nothing gets cross-tagged.
+      // The current session has messages and belongs to the previous profile, so it
+      // cannot stay selected. Prefer that profile's MOST RECENT conversation over
+      // minting an empty one: switching profiles is a context change, not a
+      // "start a new conversation" command. Falls back to a new session when the
+      // target profile has no conversation yet.
       const workspaceVisible = typeof _workspacePanelMode !== 'undefined' && _workspacePanelMode !== 'closed';
+      const _recentSid = await _mostRecentProfileSessionId();
+      if (_recentSid && typeof loadSession === 'function') {
+        if (typeof _setProfileSwitchListEmbargo === 'function') _setProfileSwitchListEmbargo(false);
+        await renderSessionList();
+        if (_switchGen !== _profileSwitchGeneration) return false;
+        let _openedRecent = false;
+        try { await loadSession(_recentSid); _openedRecent = true; } catch (_) { _openedRecent = false; }
+        if (_openedRecent) {
+          syncTopbar();
+          if (_switchGen !== _profileSwitchGeneration) return false;
+          if (workspaceVisible && typeof clearWorkspaceTreeSkeleton === 'function') clearWorkspaceTreeSkeleton();
+          showToast(t('profile_switched', name));
+          return true;
+        }
+      }
+      // No recent conversation (or it could not be opened) — start one, as before.
       await newSession(false, {awaitWorkspaceLoad: workspaceVisible, worktree: false});
       if (_switchGen !== _profileSwitchGeneration) return false;
       // Keep topbar chips (workspace/profile) in sync after creating the
@@ -7737,6 +7779,15 @@ async function switchToProfile(name) {
       if (typeof _setProfileSwitchListEmbargo === 'function') _setProfileSwitchListEmbargo(false);
       await renderSessionList();
       if (_switchGen !== _profileSwitchGeneration) return;
+      // Same rule as the with-messages branch: activate the profile's newest
+      // conversation instead of leaving the blank chat selected.
+      try {
+        const _recentBlank = await _mostRecentProfileSessionId();
+        if (_recentBlank && typeof loadSession === 'function') {
+          await loadSession(_recentBlank);
+          if (_switchGen !== _profileSwitchGeneration) return;
+        }
+      } catch (_) { /* keep the blank session if the newest one cannot open */ }
       if (typeof _openProfileSwitchSessionBrowser === 'function') _openProfileSwitchSessionBrowser();
       syncTopbar();
       // Refresh workspace file tree so the right panel shows the new

@@ -3446,10 +3446,37 @@ def _finalize_cancelled_turn(
         _cleanup_ephemeral_cancelled_turn(session)
         return
     _persist_cancelled_turn(session, message=message)
+    _pause_goal_after_cancelled_turn(session)
     try:
         session.save()
     except Exception:
         logger.debug("Failed to persist cancelled turn", exc_info=True)
+
+
+def _pause_goal_after_cancelled_turn(session) -> None:
+    """Mark an active standing goal paused when its turn was cancelled.
+
+    Plan A for the WebUI ``/goal`` zombie: the goal loop is advanced only from
+    the settle path that evaluates a COMPLETED turn. Interrupted turns leave the
+    goal ``active`` with ``turns_used`` unchanged and no continuation armed, so
+    ``/goal status`` keeps claiming it is running while nothing will ever move
+    it. Pausing here makes the state truthful; a fresh ``/goal <text>`` is what
+    restarts the loop (``/goal resume`` starts no turn).
+
+    Best-effort: a goal-store failure must never break turn cancellation.
+    """
+    try:
+        session_id = getattr(session, "session_id", None)
+        if not session_id:
+            return
+        from api.goals import pause_goal_on_interrupt
+        from api.models import _get_profile_home
+
+        profile_home = _get_profile_home(getattr(session, "profile", None))
+        if pause_goal_on_interrupt(session_id, profile_home=profile_home):
+            logger.info("Goal paused because the turn was cancelled (session %s)", session_id)
+    except Exception:
+        logger.debug("Failed to pause goal after cancelled turn", exc_info=True)
 
 
 def _aiagent_import_error_detail() -> str:

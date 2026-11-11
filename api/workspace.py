@@ -1071,6 +1071,107 @@ def list_workspace_suggestions(
     return suggestions[:limit]
 
 
+def session_data_roots(profile: str | Path | None = None) -> list[Path]:
+    """Top-level ancestors of the directories this profile's sessions already use.
+
+    The picker may browse (and register) inside these trees because that is where
+    the agent already holds history: on a self-hosted box whose sessions all live
+    under /research, requiring a pre-saved workspace just to see that tree would
+    be backwards. Read-only scan of the session DB; any failure degrades to an
+    empty list so the saved-workspace/home rule stays the only authority.
+    """
+    import sqlite3
+
+    try:
+        from api.models import _active_state_db_path
+
+        db_path = _active_state_db_path()
+    except Exception:
+        return []
+    out: list[Path] = []
+    seen: set[str] = set()
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+            fields = [f for f in ("cwd", "workspace", "project_workspace", "created_workspace") if f in cols]
+            if not fields:
+                return []
+            where = " OR ".join(f"{f} IS NOT NULL AND {f} != ''" for f in fields)
+            for row in conn.execute(f"SELECT {', '.join(fields)} FROM sessions WHERE {where}"):
+                for value in row:
+                    if not isinstance(value, str) or not value.strip():
+                        continue
+                    parts = [p for p in value.strip().split("/") if p]
+                    if not parts:
+                        continue
+                    top = Path("/" + parts[0])
+                    if str(top) in seen:
+                        continue
+                    seen.add(str(top))
+                    try:
+                        resolved = _resolve_path(top)
+                    except Exception:
+                        resolved = top
+                    if resolved.is_dir() and not _is_blocked_workspace_path(resolved, str(resolved)):
+                        out.append(resolved)
+        finally:
+            conn.close()
+    except Exception:
+        return []
+    return out
+
+
+def browse_workspace_dirs(path: str = "", profile: str | Path | None = None, limit: int = 300) -> dict:
+    """List child directories of *path* for the sidebar workspace picker.
+
+    Pure read-only browsing, root included: the picker must be able to start at /
+    and walk anywhere (the operator owns the box), so there is no trusted-roots
+    gate here. Only directory NAMES are returned - never file contents. What may
+    be REGISTERED as a workspace is still decided by validate_workspace_to_add /
+    _handle_workspace_add, not by this lister.
+    """
+    raw = (path or "").strip() or "/"
+    if raw.startswith("~"):
+        target = _expanduser_path(raw)
+    else:
+        target = Path(raw)
+        if not target.is_absolute():
+            target = _home_path() / target
+    try:
+        resolved = _resolve_path(target)
+    except Exception:
+        resolved = Path(os.path.abspath(str(target)))
+
+    payload = {"path": str(resolved), "parent": None, "entries": [], "error": None}
+    if not resolved.exists() or not resolved.is_dir():
+        payload["error"] = "not_a_directory"
+        return payload
+
+    try:
+        children = sorted(resolved.iterdir(), key=lambda p: p.name.lower())
+    except OSError:
+        payload["error"] = "permission_denied"
+        return payload
+
+    entries = []
+    for child in children:
+        if len(entries) >= limit:
+            break
+        try:
+            if not child.is_dir():
+                continue
+        except OSError:
+            continue
+        entries.append({"name": child.name, "path": str(child)})
+
+    up = resolved.parent
+    if str(up) != str(resolved):
+        payload["parent"] = str(up)
+    payload["entries"] = entries
+    return payload
+
+
 def resolve_trusted_workspace(path: str | Path | None = None, profile: str | Path | None = None) -> Path:
     """Resolve and validate a workspace path.
 
